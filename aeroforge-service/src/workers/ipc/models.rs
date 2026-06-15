@@ -14,6 +14,7 @@ pub enum PipeRequest {
     GetCapabilities,
     GetControlSnapshot,
     GetTelemetrySnapshot,
+    RestoreStartupState,
     ApplyPowerProfile {
         payload: ApplyPowerProfileRequest,
     },

@@ -45,6 +45,7 @@ enum PipeRequest {
     GetCapabilities,
     GetControlSnapshot,
     GetTelemetrySnapshot,
+    RestoreStartupState,
     ApplyPowerProfile {
         payload: ApplyPowerProfileRequest,
     },
@@ -300,6 +301,15 @@ pub fn fetch_live_controls() -> Result<LiveControlSnapshot, Box<dyn std::error::
 {
     let payload = request(PipeRequest::GetControlSnapshot)?;
     Ok(serde_json::from_value::<LiveControlSnapshot>(payload)?)
+}
+
+pub fn restore_startup_state() -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    let payload = request(PipeRequest::RestoreStartupState)?;
+    Ok(payload
+        .get("detail")
+        .and_then(Value::as_str)
+        .unwrap_or("Restored saved AeroForge state on manual app launch.")
+        .to_string())
 }
 
 pub fn apply_power_profile(

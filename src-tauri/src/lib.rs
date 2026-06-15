@@ -65,6 +65,9 @@ pub fn run() {
             if let Err(error) = service_pipe::ensure_service_running() {
                 eprintln!("AeroForge service startup check failed: {error}");
             }
+            if let Err(error) = service_pipe::restore_startup_state() {
+                eprintln!("AeroForge manual-launch restore failed during startup: {error}");
+            }
             if let Err(error) = blue_light::sync_saved_state(saved_blue_light_state) {
                 eprintln!("AeroForge blue-light sync failed during startup: {error}");
             }

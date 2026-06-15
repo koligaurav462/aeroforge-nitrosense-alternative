@@ -40,6 +40,16 @@ pub fn process_request(
                 message: error.to_string(),
             },
         },
+        PipeRequest::RestoreStartupState => match control::restore_startup_state(paths) {
+            Ok(()) => PipeResponse::Ok {
+                payload: json!({
+                    "detail": "Restored saved AeroForge power and fan state on manual app launch."
+                }),
+            },
+            Err(error) => PipeResponse::Error {
+                message: error.to_string(),
+            },
+        },
         PipeRequest::ApplyPowerProfile { payload } => {
             match control::apply_power_profile(paths, payload) {
                 Ok(applied) => PipeResponse::Ok {

@@ -17,6 +17,7 @@ use crate::{
     workers::{run_periodic_worker, unix_timestamp, WorkerEventSender, WorkerRegistration},
 };
 use std::sync::{Mutex, OnceLock};
+use std::time::Instant;
 
 pub use models::{
     AppliedBootLogoSnapshot, AppliedFanControlSnapshot, AppliedGpuTuningSnapshot,
@@ -29,7 +30,14 @@ pub use models::{
 const WORKER_NAME: &str = "control-worker";
 const SAMPLE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
 const CUSTOM_FAN_REFRESH_INTERVAL_SECS: u64 = 1;
+const STARTUP_RECONCILE_CHECKPOINTS_SECS: [u64; 3] = [15, 45, 120];
 static FAN_APPLY_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+static STARTUP_RECONCILE_STATE: OnceLock<Mutex<StartupReconcileState>> = OnceLock::new();
+
+struct StartupReconcileState {
+    started_at: Instant,
+    next_checkpoint_index: usize,
+}
 
 pub fn registration() -> WorkerRegistration {
     WorkerRegistration::new(WORKER_NAME, run)
@@ -228,11 +236,9 @@ fn run(
     )
 }
 
-// made by faxcon
 fn tick(paths: &ServicePaths) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     state::persist_default_snapshot(paths)?;
 
-    // INITIAL READ: Check if acquiring the lock is worth it
     let initial_snapshot = match state::load_snapshot(paths) {
         Ok(snapshot) => snapshot,
         Err(error) => {
@@ -247,7 +253,10 @@ fn tick(paths: &ServicePaths) -> Result<(), Box<dyn std::error::Error + Send + S
         }
     };
 
-    // Quick exit checks - before acquiring lock
+    if run_due_startup_reconcile(paths)? {
+        return Ok(());
+    }
+
     if !matches!(
         initial_snapshot.active_fan_profile,
         Some(FanProfileId::Custom)
@@ -263,13 +272,11 @@ fn tick(paths: &ServicePaths) -> Result<(), Box<dyn std::error::Error + Send + S
         return Ok(());
     }
 
-    // Acquire lock
     let _fan_apply_guard = FAN_APPLY_LOCK
         .get_or_init(|| Mutex::new(()))
         .lock()
         .map_err(|_| "Fan apply lock was poisoned.")?;
 
-    // *** CRITICAL FIX: Re-read after acquiring lock ***
     let snapshot = match state::load_snapshot(paths) {
         Ok(snapshot) => snapshot,
         Err(error) => {
@@ -282,9 +289,7 @@ fn tick(paths: &ServicePaths) -> Result<(), Box<dyn std::error::Error + Send + S
         }
     };
 
-    // Re-check - mode may have changed.
     if !matches!(snapshot.active_fan_profile, Some(FanProfileId::Custom)) {
-        // Switched to Auto, exit
         return Ok(());
     }
 
@@ -292,7 +297,6 @@ fn tick(paths: &ServicePaths) -> Result<(), Box<dyn std::error::Error + Send + S
         return Ok(());
     };
 
-    // Now safe - apply with fresh state
     match fan::apply_custom_fan_curves(
         paths,
         ApplyCustomFanCurvesRequest {
@@ -311,6 +315,52 @@ fn tick(paths: &ServicePaths) -> Result<(), Box<dyn std::error::Error + Send + S
     Ok(())
 }
 
+fn run_due_startup_reconcile(
+    paths: &ServicePaths,
+) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+    let mut state = STARTUP_RECONCILE_STATE
+        .get_or_init(|| {
+            Mutex::new(StartupReconcileState {
+                started_at: Instant::now(),
+                next_checkpoint_index: 0,
+            })
+        })
+        .lock()
+        .map_err(|_| "Startup reconcile lock was poisoned.")?;
+
+    let Some(next_checkpoint_secs) = STARTUP_RECONCILE_CHECKPOINTS_SECS
+        .get(state.next_checkpoint_index)
+        .copied()
+    else {
+        return Ok(false);
+    };
+
+    if state.started_at.elapsed().as_secs() < next_checkpoint_secs {
+        return Ok(false);
+    }
+
+    state.next_checkpoint_index += 1;
+    drop(state);
+
+    write_log_line(
+        &paths.component_log("control-worker"),
+        "INFO",
+        &format!(
+            "Running post-boot restore reconcile at +{next_checkpoint_secs}s to counter delayed firmware or vendor-service overrides."
+        ),
+    )?;
+
+    if let Err(error) = restore_startup_state(paths) {
+        let _ = write_log_line(
+            &paths.component_log("control-worker"),
+            "ERROR",
+            &format!("Post-boot restore reconcile failed: {error}"),
+        );
+    }
+
+    Ok(true)
+}
+
 fn custom_fan_refresh_due(last_applied_at_unix: Option<u64>) -> bool {
     let Some(last_applied_at_unix) = last_applied_at_unix else {
         return true;
@@ -319,7 +369,7 @@ fn custom_fan_refresh_due(last_applied_at_unix: Option<u64>) -> bool {
     unix_timestamp().saturating_sub(last_applied_at_unix) >= CUSTOM_FAN_REFRESH_INTERVAL_SECS
 }
 
-fn restore_startup_state(
+pub fn restore_startup_state(
     paths: &ServicePaths,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let snapshot = state::load_snapshot(paths)?;

@@ -3153,8 +3153,9 @@ function App() {
   async function handleFanProfile(profileId: FanProfile['id']) {
     const profileName = fanProfiles.find((profile) => profile.id === profileId)?.name ?? 'Fan'
     let hasService = serviceConnectedRef.current
+    const previousFanProfile =
+      liveControlSnapshotRef.current?.activeFanProfile ?? activeFanProfile
 
-    setActiveFanProfile(profileId)
     setStatusMessage(
       hasService
         ? `${profileName} fan mode apply requested.`
@@ -3270,6 +3271,7 @@ function App() {
         setStatusMessage(result.detail)
       }
     } catch (error) {
+      setActiveFanProfile(previousFanProfile)
       queuePerformanceEvent('fan-profile-apply-failed', profileId, {
         totalMs: performance.now() - applyStartedMs,
         error: describeError(error),
@@ -3327,8 +3329,9 @@ function App() {
   ) {
     const nextActiveFanProfile = options?.activateCustom ? 'custom' : activeFanProfile
     const nextFanSyncLockEnabled = options?.fanSyncLockState ?? fanSyncLockEnabled
+    const shouldPreviewCustom = options?.activateCustom && !serviceConnected
 
-    if (options?.activateCustom) {
+    if (shouldPreviewCustom) {
       setActiveFanProfile('custom')
       pulseControl('custom')
     }
