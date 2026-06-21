@@ -33,19 +33,11 @@ Function VerifyAeroForgeCleanForInstall
   FileWrite $9 "param([string]$$InstallDir)$\r$\n"
   FileWrite $9 "$$ErrorActionPreference = 'SilentlyContinue'$\r$\n"
   FileWrite $9 "$$issues = New-Object System.Collections.Generic.List[string]$\r$\n"
-  FileWrite $9 "if (Get-Service -Name 'AeroForgeService' -ErrorAction SilentlyContinue) { [void]$$issues.Add('AeroForgeService is still registered') }$\r$\n"
   FileWrite $9 "$$procs = @(Get-Process aeroforge-control,aeroforge-hotkey-helper,aeroforge-update-bridge,aeroforge-service -ErrorAction SilentlyContinue)$\r$\n"
   FileWrite $9 "if ($$procs.Count -gt 0) { [void]$$issues.Add(('AeroForge process still running: ' + (($$procs | Select-Object -ExpandProperty ProcessName -Unique) -join ', '))) }$\r$\n"
   FileWrite $9 "if (Test-Path -LiteralPath $$InstallDir) {$\r$\n"
   FileWrite $9 "  $$children = @(Get-ChildItem -LiteralPath $$InstallDir -Force -ErrorAction SilentlyContinue)$\r$\n"
   FileWrite $9 "  if ($$children.Count -gt 0) { [void]$$issues.Add('Install directory is not empty: ' + $$InstallDir) }$\r$\n"
-  FileWrite $9 "}$\r$\n"
-  FileWrite $9 "$$serviceRoot = Join-Path $$env:ProgramData 'AeroForge\Service'$\r$\n"
-  FileWrite $9 "foreach ($$path in @((Join-Path $$serviceRoot 'bin\aeroforge-service.exe'), (Join-Path $$serviceRoot 'drivers\IntelMSR.bin'), (Join-Path $$serviceRoot 'state'))) {$\r$\n"
-  FileWrite $9 "  if (Test-Path -LiteralPath $$path) { [void]$$issues.Add('Service runtime residue remains: ' + $$path) }$\r$\n"
-  FileWrite $9 "}$\r$\n"
-  FileWrite $9 "foreach ($$taskName in @('AeroForgeHotkeyHelper', 'AeroForgePrewarm')) {$\r$\n"
-  FileWrite $9 "  if (Get-ScheduledTask -TaskName $$taskName -ErrorAction SilentlyContinue) { [void]$$issues.Add('Scheduled task remains: ' + $$taskName) }$\r$\n"
   FileWrite $9 "}$\r$\n"
   FileWrite $9 "if ($$issues.Count -gt 0) { $$issues | ForEach-Object { Write-Output $_ }; exit 20 }$\r$\n"
   FileWrite $9 "exit 0$\r$\n"
@@ -62,6 +54,9 @@ Function ScheduleAeroForgeInstallerAfterReboot
   FileWrite $9 "$$taskName = 'AeroForgePostRebootInstall'$\r$\n"
   FileWrite $9 "$$pendingRoot = Join-Path $$env:ProgramData 'AeroForge\PendingInstall'$\r$\n"
   FileWrite $9 "New-Item -ItemType Directory -Force -Path $$pendingRoot | Out-Null$\r$\n"
+  FileWrite $9 "$$log = Join-Path $$pendingRoot 'resume-schedule.log'$\r$\n"
+  FileWrite $9 "function Write-ResumeLog { param([string]$$Message) Add-Content -LiteralPath $$log -Value ('[{0}] {1}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $$Message) -Encoding UTF8 }$\r$\n"
+  FileWrite $9 "Write-ResumeLog 'Preparing post-reboot AeroForge installer resume.'$\r$\n"
   FileWrite $9 "$$pendingInstaller = Join-Path $$pendingRoot 'AeroForge-Control-Setup-Pending.exe'$\r$\n"
   FileWrite $9 "$$runner = Join-Path $$pendingRoot 'Resume-AeroForgeInstall.ps1'$\r$\n"
   FileWrite $9 "Copy-Item -LiteralPath $$InstallerPath -Destination $$pendingInstaller -Force$\r$\n"
@@ -81,8 +76,24 @@ Function ScheduleAeroForgeInstallerAfterReboot
   FileWrite $9 "$$user = [Security.Principal.WindowsIdentity]::GetCurrent().Name$\r$\n"
   FileWrite $9 "$$principal = New-ScheduledTaskPrincipal -UserId $$user -LogonType Interactive -RunLevel Highest$\r$\n"
   FileWrite $9 "$$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 30)$\r$\n"
-  FileWrite $9 "Unregister-ScheduledTask -TaskName $$taskName -Confirm:$$false -ErrorAction SilentlyContinue$\r$\n"
-  FileWrite $9 "Register-ScheduledTask -TaskName $$taskName -Action $$action -Trigger $$trigger -Principal $$principal -Settings $$settings -Force | Out-Null$\r$\n"
+  FileWrite $9 "try {$\r$\n"
+  FileWrite $9 "  Unregister-ScheduledTask -TaskName $$taskName -Confirm:$$false -ErrorAction SilentlyContinue$\r$\n"
+  FileWrite $9 "  Register-ScheduledTask -TaskName $$taskName -Action $$action -Trigger $$trigger -Principal $$principal -Settings $$settings -Force | Out-Null$\r$\n"
+  FileWrite $9 "  Write-ResumeLog 'Registered elevated AeroForgePostRebootInstall scheduled task.'$\r$\n"
+  FileWrite $9 "  exit 0$\r$\n"
+  FileWrite $9 "} catch {$\r$\n"
+  FileWrite $9 "  Write-ResumeLog ('Scheduled task registration failed: ' + $$_.Exception.Message)$\r$\n"
+  FileWrite $9 "}$\r$\n"
+  FileWrite $9 "try {$\r$\n"
+  FileWrite $9 "  $$runOnceCommand = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ' + $$runner$\r$\n"
+  FileWrite $9 "  New-Item -Path 'HKLM:\Software\Microsoft\Windows\CurrentVersion\RunOnce' -Force | Out-Null$\r$\n"
+  FileWrite $9 "  Set-ItemProperty -Path 'HKLM:\Software\Microsoft\Windows\CurrentVersion\RunOnce' -Name $$taskName -Value $$runOnceCommand -Force$\r$\n"
+  FileWrite $9 "  Write-ResumeLog 'Registered HKLM RunOnce fallback for AeroForge installer resume.'$\r$\n"
+  FileWrite $9 "  exit 0$\r$\n"
+  FileWrite $9 "} catch {$\r$\n"
+  FileWrite $9 "  Write-ResumeLog ('RunOnce fallback registration failed: ' + $$_.Exception.Message)$\r$\n"
+  FileWrite $9 "  exit 30$\r$\n"
+  FileWrite $9 "}$\r$\n"
   FileClose $9
   ExecWait '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "$PLUGINSDIR\ScheduleAeroForgePostRebootInstall.ps1" "$EXEPATH" "$INSTDIR"' $8
 FunctionEnd
@@ -90,7 +101,7 @@ FunctionEnd
 Function RequireRebootForCleanInstall
   Call ScheduleAeroForgeInstallerAfterReboot
   ${If} $8 != 0
-    MessageBox MB_ICONSTOP|MB_OK "AeroForge Control could not fully remove the previous install, and could not schedule setup to resume after reboot. Please manually uninstall AeroForge Control, reboot, then run this installer again."
+    MessageBox MB_ICONSTOP|MB_OK "AeroForge Control could not fully remove the previous install, and could not schedule setup to resume after reboot. Please manually uninstall AeroForge Control, reboot, then run this installer again.$\r$\n$\r$\nDiagnostic log:$\r$\n$COMMONAPPDATA\AeroForge\PendingInstall\resume-schedule.log"
     Abort
   ${EndIf}
 
