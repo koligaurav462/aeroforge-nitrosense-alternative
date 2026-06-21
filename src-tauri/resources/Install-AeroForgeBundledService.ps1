@@ -547,6 +547,25 @@ function Configure-PawnIoProvider {
   Write-InstallLog "Configured PawnIO CPU MSR/RAPL provider with DLL $pawnIoDll and module $pawnIoIntelMsrInstalled."
 }
 
+function Remove-AeroForgeServiceRuntimeFiles {
+  foreach ($path in @(
+    $serviceBinDir,
+    $serviceDriverDir,
+    (Join-Path $serviceRoot 'state')
+  )) {
+    if (-not (Test-Path -LiteralPath $path)) {
+      continue
+    }
+
+    try {
+      Write-InstallLog "Removing AeroForge service runtime path $path."
+      Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction Stop
+    } catch {
+      Write-InstallLog "WARN: Could not remove $path during service uninstall: $($_.Exception.Message)"
+    }
+  }
+}
+
 function Uninstall-AeroForgeService {
   Write-InstallLog "Uninstall requested for $serviceName."
   Disable-AeroForgeServiceForRemoval
@@ -561,6 +580,7 @@ function Uninstall-AeroForgeService {
   Set-MachineEnvironmentVariable -Name $pawnIoDllEnv -Value $null
   Set-MachineEnvironmentVariable -Name $pawnIoModuleEnv -Value $null
   Set-MachineEnvironmentVariable -Name $pawnIoEnableEnv -Value $null
+  Remove-AeroForgeServiceRuntimeFiles
   Write-InstallLog "Uninstall step complete for $serviceName."
 }
 
