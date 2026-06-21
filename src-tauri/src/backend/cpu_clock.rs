@@ -1,11 +1,33 @@
-use std::os::windows::process::CommandExt;
 use std::{
-    process::Command,
+    ffi::c_void,
+    mem::size_of,
     sync::{Mutex, OnceLock},
     time::{Duration, Instant},
 };
 
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+const PROCESSOR_INFORMATION_LEVEL: u32 = 11;
+const STATUS_SUCCESS: i32 = 0;
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct ProcessorPowerInformation {
+    number: u32,
+    max_mhz: u32,
+    current_mhz: u32,
+    mhz_limit: u32,
+    max_idle_state: u32,
+    current_idle_state: u32,
+}
+
+extern "system" {
+    fn CallNtPowerInformation(
+        information_level: u32,
+        input_buffer: *mut c_void,
+        input_buffer_length: u32,
+        output_buffer: *mut c_void,
+        output_buffer_length: u32,
+    ) -> i32;
+}
 
 struct CpuClockCache {
     last_refresh: Option<Instant>,
@@ -43,23 +65,30 @@ pub fn read_effective_cpu_clock_mhz() -> Option<u16> {
 }
 
 fn query_effective_cpu_clock_mhz() -> Option<u16> {
-    let output = Command::new("powershell")
-        .creation_flags(CREATE_NO_WINDOW)
-        .args([
-            "-NoProfile",
-            "-Command",
-            "$cores = Get-CimInstance Win32_PerfFormattedData_Counters_ProcessorInformation -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^\\d+,\\d+$' }; if ($cores) { $effective = $cores | ForEach-Object { ([double]$_.ProcessorFrequency) * (([double]$_.PercentProcessorPerformance) / 100.0) } | Measure-Object -Average; [int][math]::Round($effective.Average) } else { $total = Get-CimInstance Win32_PerfFormattedData_Counters_ProcessorInformation -ErrorAction SilentlyContinue | Where-Object { $_.Name -eq '_Total' } | Select-Object -First 1; if ($total) { [int][math]::Round(([double]$total.ProcessorFrequency) * (([double]$total.PercentProcessorPerformance) / 100.0)) } }",
-        ])
-        .output()
-        .ok()?;
+    let processor_count = std::thread::available_parallelism().ok()?.get();
+    let mut processors = vec![ProcessorPowerInformation::default(); processor_count];
+    let status = unsafe {
+        CallNtPowerInformation(
+            PROCESSOR_INFORMATION_LEVEL,
+            std::ptr::null_mut(),
+            0,
+            processors.as_mut_ptr().cast(),
+            (processors.len() * size_of::<ProcessorPowerInformation>()) as u32,
+        )
+    };
 
-    if !output.status.success() {
+    if status != STATUS_SUCCESS {
         return None;
     }
 
-    String::from_utf8_lossy(&output.stdout)
-        .trim()
-        .parse::<u16>()
-        .ok()
-        .filter(|value| *value > 0)
+    let mut total_mhz = 0u64;
+    let mut sample_count = 0u64;
+    for processor in processors {
+        if processor.current_mhz > 0 {
+            total_mhz += processor.current_mhz as u64;
+            sample_count += 1;
+        }
+    }
+
+    (sample_count > 0).then_some((total_mhz / sample_count).min(u16::MAX as u64) as u16)
 }

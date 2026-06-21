@@ -1,5 +1,6 @@
 use std::{
-    os::windows::process::CommandExt,
+    ffi::c_void,
+    mem::size_of,
     sync::{Arc, Mutex, OnceLock},
     time::Instant,
 };
@@ -14,13 +15,33 @@ use crate::paths::ServicePaths;
 
 static CPU_USAGE_SAMPLER: OnceLock<Mutex<CpuUsageSampler>> = OnceLock::new();
 static CPU_CLOCK_CACHE: OnceLock<Arc<Mutex<CpuClockCache>>> = OnceLock::new();
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+const PROCESSOR_INFORMATION_LEVEL: u32 = 11;
+const STATUS_SUCCESS: i32 = 0;
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct ProcessorPowerInformation {
+    number: u32,
+    max_mhz: u32,
+    current_mhz: u32,
+    mhz_limit: u32,
+    max_idle_state: u32,
+    current_idle_state: u32,
+}
 
 extern "system" {
     fn GetSystemTimes(
         lp_idle_time: *mut FILETIME,
         lp_kernel_time: *mut FILETIME,
         lp_user_time: *mut FILETIME,
+    ) -> i32;
+
+    fn CallNtPowerInformation(
+        information_level: u32,
+        input_buffer: *mut c_void,
+        input_buffer_length: u32,
+        output_buffer: *mut c_void,
+        output_buffer_length: u32,
     ) -> i32;
 }
 
@@ -163,22 +184,40 @@ fn read_cpu_times() -> Result<CpuTimes, Box<dyn std::error::Error + Send + Sync>
 }
 
 fn query_cpu_clock_mhz() -> Result<u16, Box<dyn std::error::Error + Send + Sync>> {
-    let output = std::process::Command::new("powershell")
-        .creation_flags(CREATE_NO_WINDOW)
-        .args([
-            "-NoProfile",
-            "-Command",
-            "$cores = Get-CimInstance Win32_PerfFormattedData_Counters_ProcessorInformation -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^\\d+,\\d+$' }; if ($cores) { $effective = $cores | ForEach-Object { ([double]$_.ProcessorFrequency) * (([double]$_.PercentProcessorPerformance) / 100.0) } | Measure-Object -Average; [int][math]::Round($effective.Average) } else { $total = Get-CimInstance Win32_PerfFormattedData_Counters_ProcessorInformation -ErrorAction SilentlyContinue | Where-Object { $_.Name -eq '_Total' } | Select-Object -First 1; if ($total) { [int][math]::Round(([double]$total.ProcessorFrequency) * (([double]$total.PercentProcessorPerformance) / 100.0)) } else { Get-CimInstance Win32_Processor | Select-Object -First 1 -ExpandProperty CurrentClockSpeed } }",
-        ])
-        .output()?;
+    let processor_count = std::thread::available_parallelism()
+        .map(|count| count.get())
+        .unwrap_or(1);
+    let mut processors = vec![ProcessorPowerInformation::default(); processor_count];
+    let status = unsafe {
+        CallNtPowerInformation(
+            PROCESSOR_INFORMATION_LEVEL,
+            std::ptr::null_mut(),
+            0,
+            processors.as_mut_ptr().cast(),
+            (processors.len() * size_of::<ProcessorPowerInformation>()) as u32,
+        )
+    };
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        return Err(format!("PowerShell CPU clock query failed: {stderr}").into());
+    if status != STATUS_SUCCESS {
+        return Err(
+            format!("CallNtPowerInformation ProcessorInformation failed: {status:#x}").into(),
+        );
     }
 
-    let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    Ok(value.parse::<u16>().unwrap_or(0))
+    let mut total_mhz = 0u64;
+    let mut sample_count = 0u64;
+    for processor in processors {
+        if processor.current_mhz > 0 {
+            total_mhz += processor.current_mhz as u64;
+            sample_count += 1;
+        }
+    }
+
+    if sample_count == 0 {
+        return Err("CallNtPowerInformation returned no CPU clock samples".into());
+    }
+
+    Ok((total_mhz / sample_count).min(u16::MAX as u64) as u16)
 }
 
 fn filetime_to_u64(value: FILETIME) -> u64 {

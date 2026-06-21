@@ -137,8 +137,13 @@ pub fn read_firmware_sensors(paths: &ServicePaths) -> FirmwareSensorSnapshot {
         |state| state.snapshot,
     );
 
-    // Thermal zone is on its own 30s cache to avoid spawning PowerShell every 2s.
-    let thermal_zone = read_thermal_zone_temp_c(paths);
+    // Thermal-zone fallback uses WMI through PowerShell. Avoid it on Acer paths
+    // where direct firmware sensors are already available.
+    let thermal_zone = if snapshot.has_acer_firmware {
+        None
+    } else {
+        read_thermal_zone_temp_c(paths)
+    };
     snapshot.thermal_zone_temp_c = thermal_zone;
     snapshot.has_thermal_zone = thermal_zone.is_some();
     snapshot
