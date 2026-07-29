@@ -58,6 +58,7 @@ enum PipeRequest {
     ApplyCustomFanCurves {
         payload: ApplyCustomFanCurvesRequest,
     },
+    StartFanSpeedCalibration,
     ApplyBootLogo {
         payload: ApplyBootLogoRequest,
     },
@@ -356,6 +357,14 @@ pub fn apply_custom_fan_curves(
         payload: ApplyCustomFanCurvesRequest { curves },
     })?;
     Ok(serde_json::from_value::<AppliedFanControlPayload>(payload)?)
+}
+
+pub fn start_fan_speed_calibration(
+) -> Result<super::models::FanSpeedCalibrationSnapshot, Box<dyn std::error::Error + Send + Sync>> {
+    let payload = request(PipeRequest::StartFanSpeedCalibration)?;
+    Ok(serde_json::from_value::<
+        super::models::FanSpeedCalibrationSnapshot,
+    >(payload)?)
 }
 
 pub fn apply_boot_logo(

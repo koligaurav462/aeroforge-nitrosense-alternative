@@ -102,6 +102,20 @@ pub fn process_request(
                 },
             }
         }
+        PipeRequest::StartFanSpeedCalibration => {
+            match control::start_fan_speed_calibration(paths) {
+                Ok(calibration) => PipeResponse::Ok {
+                    payload: serde_json::to_value(calibration).unwrap_or_else(|error| {
+                        json!({
+                            "detail": format!("Started fan speed calibration but failed to serialize response: {error}")
+                        })
+                    }),
+                },
+                Err(error) => PipeResponse::Error {
+                    message: error.to_string(),
+                },
+            }
+        }
         PipeRequest::ApplyBootLogo { payload } => match control::apply_boot_logo(paths, payload) {
             Ok(applied) => PipeResponse::Ok {
                 payload: serde_json::to_value(applied).unwrap_or_else(|error| {

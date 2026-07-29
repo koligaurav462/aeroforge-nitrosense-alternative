@@ -25,8 +25,10 @@ import {
   installStagedUpdate,
   saveControlSnapshot,
   setNvidiaTelemetryEnabled,
+  showThermalWarningNotification,
   showUpdateNotification,
   stageUpdateDownload,
+  startFanSpeedCalibration,
   type CapabilitySnapshot,
   type ControlSnapshot,
   type BootArtId,
@@ -41,7 +43,7 @@ import {
 
 type CurveTarget = 'cpu' | 'gpu'
 type ControlTab = 'home' | 'power' | 'fans' | 'personal' | 'debug'
-type PersonalSection = 'updates' | 'charge' | 'screen' | 'boot'
+type PersonalSection = 'updates' | 'charge' | 'screen' | 'config' | 'boot'
 type UpdateChannel = ControlSnapshot['personalSettings']['updateChannel']
 type UpdateAction = 'check' | 'stage' | 'install'
 type CurvePoint = {
@@ -431,6 +433,11 @@ const personalSections: {
     id: 'screen',
     label: 'Screen',
     description: 'Display comfort controls and eye-care settings.',
+  },
+  {
+    id: 'config',
+    label: 'Config',
+    description: 'Hardware calibration and local tuning data.',
   },
   {
     id: 'boot',
@@ -1456,11 +1463,18 @@ function App() {
   const [updateActionMessage, setUpdateActionMessage] = useState<string | null>(null)
   const autoUpdateCheckTriggeredRef = useRef(false)
   const updateNotificationKeyRef = useRef<string | null>(null)
+  const quietAutoThermalNotificationKeyRef = useRef<string | null>(null)
   const [statusMessage, setStatusMessage] = useState(
     'Desktop backend starting. Loading persisted AeroForge state.',
   )
   const [settingsActionPending, setSettingsActionPending] = useState<
-    null | 'smart-charge' | 'blue-light' | 'boot-logo' | 'refresh-rate' | 'nvidia-telemetry'
+    | null
+    | 'smart-charge'
+    | 'blue-light'
+    | 'boot-logo'
+    | 'refresh-rate'
+    | 'nvidia-telemetry'
+    | 'fan-calibration'
   >(null)
   const [glowTarget, setGlowTarget] = useState<string>('turbo')
   const [shellStatus, setShellStatus] = useState('Browser preview shell')
@@ -1543,6 +1557,19 @@ function App() {
   const bootLogoPending = settingsActionPending === 'boot-logo'
   const refreshRatePending = settingsActionPending === 'refresh-rate'
   const nvidiaTelemetryPending = settingsActionPending === 'nvidia-telemetry'
+  const fanCalibrationPending = settingsActionPending === 'fan-calibration'
+  const fanSpeedCalibration = liveControlSnapshot?.fanSpeedCalibration
+  const fanCalibrationRunning = fanSpeedCalibration?.running ?? false
+  const fanCalibrationPointCount = fanSpeedCalibration?.points?.length ?? 0
+  const fanCalibrationProgressLabel =
+    fanSpeedCalibration?.currentPercent !== null &&
+    fanSpeedCalibration?.currentPercent !== undefined
+      ? `${fanSpeedCalibration.currentPercent}%`
+      : fanCalibrationRunning
+        ? 'Queued'
+        : fanCalibrationPointCount > 0
+          ? `${fanCalibrationPointCount} points`
+          : 'Not run'
   const currentPowerProfile = powerProfiles.find(
     (profile) => profile.id === activePowerProfile,
   )!
@@ -3567,6 +3594,35 @@ function App() {
     }
   }
 
+  useEffect(() => {
+    const warning = liveControlSnapshot?.quietAutoThermalWarning ?? null
+    if (!warning?.active || warning.tempC == null) {
+      quietAutoThermalNotificationKeyRef.current = null
+      return
+    }
+
+    const sensorLabel = warning.sensor?.trim() || 'CPU'
+    const notificationKey = `${sensorLabel}:quiet-auto-hot`
+    if (
+      !isDesktopRuntime() ||
+      quietAutoThermalNotificationKeyRef.current === notificationKey
+    ) {
+      return
+    }
+
+    quietAutoThermalNotificationKeyRef.current = notificationKey
+    void showThermalWarningNotification(sensorLabel, warning.tempC).catch((error) => {
+      quietAutoThermalNotificationKeyRef.current = null
+      pushTransportDebugEventRef.current(
+        `windows thermal warning notification failed: ${describeError(error)}`,
+      )
+    })
+  }, [
+    liveControlSnapshot?.quietAutoThermalWarning?.active,
+    liveControlSnapshot?.quietAutoThermalWarning?.sensor,
+    liveControlSnapshot?.quietAutoThermalWarning?.tempC,
+  ])
+
   async function runUpdateCheck(manual: boolean, channelOverride?: UpdateChannel) {
     setUpdateActionPending('check')
     setUpdateActionMessage('Checking the published GitHub release feed...')
@@ -3808,6 +3864,24 @@ function App() {
       setStatusMessage(`NVIDIA telemetry setting failed: ${describeError(error)}`)
     } finally {
       setSettingsActionPending((current) => (current === 'nvidia-telemetry' ? null : current))
+    }
+  }
+
+  async function handleFanSpeedCalibration() {
+    if (settingsActionPending || fanCalibrationRunning) {
+      return
+    }
+
+    setSettingsActionPending('fan-calibration')
+    setStatusMessage('Starting fan speed calibration. AeroForge will test every 5% and record RPM readback.')
+
+    try {
+      const result = await startFanSpeedCalibration()
+      setStatusMessage(result.status)
+    } catch (error) {
+      setStatusMessage(`Fan speed calibration failed to start: ${describeError(error)}`)
+    } finally {
+      setSettingsActionPending((current) => (current === 'fan-calibration' ? null : current))
     }
   }
 
@@ -5095,6 +5169,63 @@ function App() {
                                 : 'Standard color balance with no comfort filter applied.'}
                             </p>
                           </div>
+                        </div>
+                      </div>
+                    </section>
+                  ) : activePersonalSection === 'config' ? (
+                    <section className="personal-frame">
+                      <div className="personal-frame__header">
+                        <span className="eyebrow">Config</span>
+                      </div>
+
+                      <div className="personal-frame__body">
+                        <div className="settings-summary-grid">
+                          <div className="settings-summary-card">
+                            <span className="eyebrow">Fan Calibration</span>
+                            <strong>{fanCalibrationRunning ? 'Running' : 'Ready'}</strong>
+                            <small>{fanSpeedCalibration?.status ?? 'No calibration data recorded yet.'}</small>
+                          </div>
+
+                          <div className="settings-summary-card">
+                            <span className="eyebrow">Current Step</span>
+                            <strong>{fanCalibrationProgressLabel}</strong>
+                            <small>
+                              Tests 0% through 100% in 5% increments and records CPU/GPU RPM.
+                            </small>
+                          </div>
+
+                          <div className="settings-summary-card">
+                            <span className="eyebrow">Settle Time</span>
+                            <strong>{fanSpeedCalibration?.settleSeconds ?? 20}s</strong>
+                            <small>{fanCalibrationPointCount} recorded calibration points.</small>
+                          </div>
+                        </div>
+
+                        <div className="personal-setting-block">
+                          <div>
+                            <strong>Run Fan Speed Calibration</strong>
+                            <p>
+                              Builds a percent-to-RPM table by applying every 5% fan target,
+                              waiting for RPM to settle, then writing the readback into AeroForge
+                              service config.
+                            </p>
+                            {fanSpeedCalibration?.lastError && (
+                              <small>{fanSpeedCalibration.lastError}</small>
+                            )}
+                          </div>
+
+                          <button
+                            className="button"
+                            disabled={settingsActionPending !== null || fanCalibrationRunning}
+                            onClick={() => void handleFanSpeedCalibration()}
+                            type="button"
+                          >
+                            {fanCalibrationPending
+                              ? 'Starting'
+                              : fanCalibrationRunning
+                                ? 'Running'
+                                : 'Run Calibration'}
+                          </button>
                         </div>
                       </div>
                     </section>

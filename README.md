@@ -65,7 +65,7 @@ npm.cmd run portable:build
 This creates:
 
 - `portable\AeroForge Control Portable\`
-- `portable\AeroForge-Control-Portable-0.13.0.zip`
+- `portable\AeroForge-Control-Portable-0.15.7.zip`
 
 ## Install the Nitro key helper
 
