@@ -139,6 +139,7 @@ Function RequireRebootForCleanInstall
   MessageBox MB_ICONEXCLAMATION|MB_YESNO "AeroForge Control could not fully remove the previous install while Windows is running.$\r$\n$\r$\nSetup has been scheduled to reopen after you sign in again.$\r$\n$\r$\nReboot now to finish cleanup and continue installation?" IDYES reboot_now IDNO reboot_later
   reboot_now:
     Reboot
+    Abort
 
   reboot_later:
     MessageBox MB_ICONINFORMATION|MB_OK "AeroForge setup will reopen after your next reboot/sign-in. Installation is stopping now so old files are not mixed with the new version."
