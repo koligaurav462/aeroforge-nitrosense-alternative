@@ -103,6 +103,7 @@ export type PersonalSettings = {
   usbPowerEnabled: boolean
   processorStateControlEnabled: boolean
   nvidiaTelemetryEnabled: boolean
+  keepUiPrewarmed: boolean
   blueLightFilterEnabled: boolean
   autoRefreshRateOnBatteryEnabled: boolean
   autoRefreshRateRestoreHz: number | null

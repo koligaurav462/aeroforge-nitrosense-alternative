@@ -1,5 +1,7 @@
 pub mod backend;
 
+use std::env;
+
 use backend::{
     blue_light, commands, nitro_guard, nitro_key, service_pipe, single_instance, smart_charge,
     state::BackendState,
@@ -8,7 +10,11 @@ use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    if single_instance::activate_existing_instance() {
+    let prewarm_mode = env::args()
+        .skip(1)
+        .any(|arg| arg == "--prewarm" || arg == "--background");
+
+    if single_instance::activate_existing_instance(!prewarm_mode) {
         return;
     }
 
@@ -77,6 +83,11 @@ pub fn run() {
             }
 
             if let Some(window) = app.get_webview_window("main") {
+                if prewarm_mode {
+                    let _ = window.hide();
+                    return Ok(());
+                }
+
                 let _ = window.show();
                 let _ = window.unminimize();
                 let _ = window.set_focus();
@@ -110,15 +121,15 @@ fn run_startup_reconcile(
     }
     let smart_charge_sync = match service_pipe::apply_smart_charging(saved_smart_charge_state) {
         Ok(_) => Ok(()),
-        Err(service_error) => tauri::async_runtime::block_on(smart_charge::sync_saved_state(
-            saved_smart_charge_state,
-        ))
-        .map(|_| ())
-        .map_err(|desktop_error| {
-            format!(
+        Err(service_error) => {
+            tauri::async_runtime::block_on(smart_charge::sync_saved_state(saved_smart_charge_state))
+                .map(|_| ())
+                .map_err(|desktop_error| {
+                    format!(
                 "service path failed: {service_error}; desktop fallback failed: {desktop_error}"
             )
-        }),
+                })
+        }
     };
     if let Err(error) = smart_charge_sync {
         eprintln!("AeroForge smart-charge sync failed during startup: {error}");

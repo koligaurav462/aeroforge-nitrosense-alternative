@@ -117,6 +117,7 @@ type PersistControlOverrides = {
   smartChargingEnabled?: boolean
   processorStateControlEnabled?: boolean
   nvidiaTelemetryEnabled?: boolean
+  keepUiPrewarmed?: boolean
   autoRefreshRateOnBatteryEnabled?: boolean
   autoRefreshRateRestoreHz?: number | null
   blueLightFilterEnabled?: boolean
@@ -1294,6 +1295,7 @@ function buildControlSnapshotForPersistence(input: {
   smartChargingEnabled: boolean
   processorStateControlEnabled: boolean
   nvidiaTelemetryEnabled: boolean
+  keepUiPrewarmed: boolean
   autoRefreshRateOnBatteryEnabled: boolean
   autoRefreshRateRestoreHz: number | null
   usbPowerEnabled: boolean
@@ -1323,6 +1325,7 @@ function buildControlSnapshotForPersistence(input: {
       usbPowerEnabled: input.usbPowerEnabled,
       processorStateControlEnabled: input.processorStateControlEnabled,
       nvidiaTelemetryEnabled: input.nvidiaTelemetryEnabled,
+      keepUiPrewarmed: input.keepUiPrewarmed,
       blueLightFilterEnabled: input.blueLightFilterEnabled,
       autoRefreshRateOnBatteryEnabled: input.autoRefreshRateOnBatteryEnabled,
       autoRefreshRateRestoreHz: input.autoRefreshRateRestoreHz,
@@ -1350,6 +1353,7 @@ function applyBackendControlSnapshot(
   setSmartChargingEnabled: (enabled: boolean) => void,
   setProcessorStateControlEnabled: (enabled: boolean) => void,
   setNvidiaTelemetryEnabled: (enabled: boolean) => void,
+  setKeepUiPrewarmed: (enabled: boolean) => void,
   setUsbPowerEnabled: (enabled: boolean) => void,
   setBlueLightFilterEnabled: (enabled: boolean) => void,
   setSelectedBootArt: (art: string) => void,
@@ -1376,6 +1380,7 @@ function applyBackendControlSnapshot(
   setSmartChargingEnabled(controls.personalSettings.smartChargingEnabled)
   setProcessorStateControlEnabled(controls.personalSettings.processorStateControlEnabled)
   setNvidiaTelemetryEnabled(controls.personalSettings.nvidiaTelemetryEnabled ?? true)
+  setKeepUiPrewarmed(controls.personalSettings.keepUiPrewarmed ?? false)
   setUsbPowerEnabled(controls.personalSettings.usbPowerEnabled)
   setBlueLightFilterEnabled(controls.personalSettings.blueLightFilterEnabled)
   setAutoRefreshRateSettings?.(
@@ -1440,6 +1445,8 @@ function App() {
   const processorStateControlEnabledRef = useRef(true)
   const [nvidiaTelemetryEnabled, setNvidiaTelemetryEnabledState] = useState(true)
   const nvidiaTelemetryEnabledRef = useRef(true)
+  const [keepUiPrewarmed, setKeepUiPrewarmed] = useState(false)
+  const keepUiPrewarmedRef = useRef(false)
   const [usbPowerEnabled, setUsbPowerEnabled] = useState(true)
   const [blueLightFilterEnabled, setBlueLightFilterEnabled] = useState(false)
   const blueLightFilterEnabledRef = useRef(false)
@@ -1837,6 +1844,11 @@ function App() {
     setNvidiaTelemetryEnabledState(enabled)
   }
 
+  function commitKeepUiPrewarmed(enabled: boolean) {
+    keepUiPrewarmedRef.current = enabled
+    setKeepUiPrewarmed(enabled)
+  }
+
   function commitBlueLightFilterEnabled(enabled: boolean) {
     blueLightFilterEnabledRef.current = enabled
     setBlueLightFilterEnabled(enabled)
@@ -1884,6 +1896,31 @@ function App() {
     [],
   )
 
+  useEffect(() => {
+    const currentWindow = getCurrentWindow()
+    let unlisten: (() => void) | null = null
+
+    void currentWindow
+      .onCloseRequested((event) => {
+        if (!keepUiPrewarmedRef.current) {
+          return
+        }
+
+        event.preventDefault()
+        void currentWindow.hide()
+        setStatusMessage(
+          'AeroForge is hidden and kept prewarmed. Turn off Keep AeroForge Prewarmed to fully exit on close.',
+        )
+      })
+      .then((cleanup) => {
+        unlisten = cleanup
+      })
+
+    return () => {
+      unlisten?.()
+    }
+  }, [])
+
   async function persistStagedControls(overrides?: PersistControlOverrides) {
     const nextActivePowerProfile = overrides?.activePowerProfile ?? activePowerProfile
     const nextActiveFanProfile = overrides?.activeFanProfile ?? activeFanProfile
@@ -1898,6 +1935,8 @@ function App() {
       overrides?.processorStateControlEnabled ?? processorStateControlEnabledRef.current
     const nextNvidiaTelemetryEnabled =
       overrides?.nvidiaTelemetryEnabled ?? nvidiaTelemetryEnabledRef.current
+    const nextKeepUiPrewarmed =
+      overrides?.keepUiPrewarmed ?? keepUiPrewarmedRef.current
     const nextAutoRefreshRateOnBatteryEnabled =
       overrides?.autoRefreshRateOnBatteryEnabled ??
       autoRefreshRateOnBatteryEnabledRef.current
@@ -1928,6 +1967,7 @@ function App() {
           smartChargingEnabled: nextSmartChargingEnabled,
           processorStateControlEnabled: nextProcessorStateControlEnabled,
           nvidiaTelemetryEnabled: nextNvidiaTelemetryEnabled,
+          keepUiPrewarmed: nextKeepUiPrewarmed,
           autoRefreshRateOnBatteryEnabled: nextAutoRefreshRateOnBatteryEnabled,
           autoRefreshRateRestoreHz: nextAutoRefreshRateRestoreHz,
           usbPowerEnabled,
@@ -1959,6 +1999,7 @@ function App() {
     smartChargingEnabled,
     processorStateControlEnabled,
     nvidiaTelemetryEnabled,
+    keepUiPrewarmed,
     autoRefreshRateOnBatteryEnabled,
     autoRefreshRateRestoreHz,
     usbPowerEnabled,
@@ -2675,6 +2716,7 @@ function App() {
             commitSmartChargingEnabled,
             commitProcessorStateControlEnabled,
             commitNvidiaTelemetryEnabled,
+            commitKeepUiPrewarmed,
             setUsbPowerEnabled,
             commitBlueLightFilterEnabled,
             setSelectedBootArt,
@@ -3028,6 +3070,7 @@ function App() {
           commitSmartChargingEnabled,
           commitProcessorStateControlEnabled,
           commitNvidiaTelemetryEnabled,
+          commitKeepUiPrewarmed,
           setUsbPowerEnabled,
           commitBlueLightFilterEnabled,
           setSelectedBootArt,
@@ -3151,6 +3194,7 @@ function App() {
         commitSmartChargingEnabled,
         commitProcessorStateControlEnabled,
         commitNvidiaTelemetryEnabled,
+        commitKeepUiPrewarmed,
         setUsbPowerEnabled,
         commitBlueLightFilterEnabled,
         setSelectedBootArt,
@@ -3280,6 +3324,7 @@ function App() {
         commitSmartChargingEnabled,
         commitProcessorStateControlEnabled,
         commitNvidiaTelemetryEnabled,
+        commitKeepUiPrewarmed,
         setUsbPowerEnabled,
         commitBlueLightFilterEnabled,
         setSelectedBootArt,
@@ -3338,6 +3383,7 @@ function App() {
       commitSmartChargingEnabled,
       commitProcessorStateControlEnabled,
       commitNvidiaTelemetryEnabled,
+      commitKeepUiPrewarmed,
       setUsbPowerEnabled,
       commitBlueLightFilterEnabled,
       setSelectedBootArt,
@@ -3490,6 +3536,7 @@ function App() {
         commitSmartChargingEnabled,
         commitProcessorStateControlEnabled,
         commitNvidiaTelemetryEnabled,
+        commitKeepUiPrewarmed,
         setUsbPowerEnabled,
         commitBlueLightFilterEnabled,
         setSelectedBootArt,
@@ -3544,6 +3591,7 @@ function App() {
         commitSmartChargingEnabled,
         commitProcessorStateControlEnabled,
         commitNvidiaTelemetryEnabled,
+        commitKeepUiPrewarmed,
         setUsbPowerEnabled,
         commitBlueLightFilterEnabled,
         setSelectedBootArt,
@@ -3851,6 +3899,7 @@ function App() {
         commitSmartChargingEnabled,
         commitProcessorStateControlEnabled,
         commitNvidiaTelemetryEnabled,
+        commitKeepUiPrewarmed,
         setUsbPowerEnabled,
         commitBlueLightFilterEnabled,
         setSelectedBootArt,
@@ -3865,6 +3914,18 @@ function App() {
     } finally {
       setSettingsActionPending((current) => (current === 'nvidia-telemetry' ? null : current))
     }
+  }
+
+  async function handleKeepUiPrewarmedToggle() {
+    const nextEnabled = !keepUiPrewarmedRef.current
+
+    commitKeepUiPrewarmed(nextEnabled)
+    await persistStagedControls({ keepUiPrewarmed: nextEnabled })
+    setStatusMessage(
+      nextEnabled
+        ? 'AeroForge will keep a hidden UI instance loaded after close. RAM usage will increase while this is enabled.'
+        : 'AeroForge UI prewarm disabled. Closing the window will fully exit the UI again.',
+    )
   }
 
   async function handleFanSpeedCalibration() {
@@ -4002,6 +4063,7 @@ function App() {
         commitSmartChargingEnabled,
         commitProcessorStateControlEnabled,
         commitNvidiaTelemetryEnabled,
+        commitKeepUiPrewarmed,
         setUsbPowerEnabled,
         commitBlueLightFilterEnabled,
         setSelectedBootArt,
@@ -4045,6 +4107,7 @@ function App() {
           smartChargingEnabled: smartChargingEnabledRef.current,
           processorStateControlEnabled: processorStateControlEnabledRef.current,
           nvidiaTelemetryEnabled: nvidiaTelemetryEnabledRef.current,
+          keepUiPrewarmed: keepUiPrewarmedRef.current,
           autoRefreshRateOnBatteryEnabled: autoRefreshRateOnBatteryEnabledRef.current,
           autoRefreshRateRestoreHz: autoRefreshRateRestoreHzRef.current,
           usbPowerEnabled,
@@ -4091,6 +4154,7 @@ function App() {
           smartChargingEnabled: smartChargingEnabledRef.current,
           processorStateControlEnabled: processorStateControlEnabledRef.current,
           nvidiaTelemetryEnabled: nvidiaTelemetryEnabledRef.current,
+          keepUiPrewarmed: keepUiPrewarmedRef.current,
           autoRefreshRateOnBatteryEnabled: autoRefreshRateOnBatteryEnabledRef.current,
           autoRefreshRateRestoreHz: autoRefreshRateRestoreHzRef.current,
           usbPowerEnabled,
@@ -5199,6 +5263,27 @@ function App() {
                             <strong>{fanSpeedCalibration?.settleSeconds ?? 20}s</strong>
                             <small>{fanCalibrationPointCount} recorded calibration points.</small>
                           </div>
+                        </div>
+
+                        <div className="personal-setting-block">
+                          <div>
+                            <strong>Keep AeroForge Prewarmed</strong>
+                            <p>
+                              {keepUiPrewarmed
+                                ? 'A hidden AeroForge UI instance stays loaded after close so the next open is faster.'
+                                : 'AeroForge fully exits when the window closes. Opening it later will cold-start the UI.'}
+                            </p>
+                            <small>Warning: this increases RAM usage while enabled.</small>
+                          </div>
+
+                          <button
+                            className={`toggle ${keepUiPrewarmed ? 'is-on' : ''}`}
+                            onClick={() => void handleKeepUiPrewarmedToggle()}
+                            aria-pressed={keepUiPrewarmed}
+                            type="button"
+                          >
+                            <span />
+                          </button>
                         </div>
 
                         <div className="personal-setting-block">

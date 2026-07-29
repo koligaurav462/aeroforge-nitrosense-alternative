@@ -471,6 +471,7 @@ fn build_default_controls() -> ControlSnapshot {
             usb_power_enabled: true,
             processor_state_control_enabled: true,
             nvidia_telemetry_enabled: true,
+            keep_ui_prewarmed: false,
             blue_light_filter_enabled: false,
             auto_refresh_rate_on_battery_enabled: false,
             auto_refresh_rate_restore_hz: None,

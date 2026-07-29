@@ -200,6 +200,8 @@ pub struct PersonalSettings {
     #[serde(default = "default_true")]
     pub nvidia_telemetry_enabled: bool,
     #[serde(default)]
+    pub keep_ui_prewarmed: bool,
+    #[serde(default)]
     pub blue_light_filter_enabled: bool,
     #[serde(default)]
     pub auto_refresh_rate_on_battery_enabled: bool,
