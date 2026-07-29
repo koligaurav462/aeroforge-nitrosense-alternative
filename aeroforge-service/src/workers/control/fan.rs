@@ -33,6 +33,7 @@ const QUIET_AUTO_ELEVATED_DEFAULT_PERCENT: u8 = 8;
 const QUIET_AUTO_RPM_LOW_TOLERANCE: u16 = 120;
 const QUIET_AUTO_RPM_HIGH_TOLERANCE: u16 = 220;
 const FAN_SPEED_CALIBRATION_SETTLE_SECS: u64 = 20;
+const FAN_SPEED_CALIBRATION_CANCEL_POLL_MS: u64 = 250;
 
 pub fn apply_fan_profile(
     paths: &ServicePaths,
@@ -251,6 +252,7 @@ pub fn apply_quiet_auto_fan_policy(
 
 pub fn run_fan_speed_calibration(
     paths: &ServicePaths,
+    cancel_requested: &dyn Fn() -> bool,
 ) -> Result<FanSpeedCalibrationSnapshot, Box<dyn std::error::Error + Send + Sync>> {
     let initial_snapshot = state::load_snapshot(paths)?;
     let started_at = unix_timestamp();
@@ -268,32 +270,45 @@ pub fn run_fan_speed_calibration(
     state::persist_fan_speed_calibration(paths, calibration.clone())?;
 
     let strategy = select_custom_fan_strategy(paths);
-    if let Some(behavior_input) = strategy.behavior_input {
-        let result = apply_custom_behavior_latch(paths, &strategy, behavior_input, "calibration")?;
-        if wmi_output_accepted(&result) {
-            thread::sleep(Duration::from_millis(150));
-        }
+    if cancel_requested() {
+        return finish_canceled_calibration(paths, &initial_snapshot, calibration, None);
     }
 
     for percent in (0u8..=100).step_by(5) {
-        calibration.current_percent = Some(percent);
-        calibration.updated_at_unix = Some(unix_timestamp());
-        calibration.status = format!("Testing {percent}% fan speed.");
-        state::persist_fan_speed_calibration(paths, calibration.clone())?;
-
-        let speed_results = apply_direct_speed_targets(Some(percent), Some(percent))?;
-        if let Some(rejected) = speed_results
-            .iter()
-            .find(|result| !wmi_output_accepted(result))
-        {
-            return Err(io::Error::other(format!(
-                "Fan speed calibration target {percent}% was rejected by AcerGamingFunction {} input {} gmOutput {:?}.",
-                rejected.method, rejected.input, rejected.output
-            ))
-            .into());
+        if cancel_requested() {
+            return finish_canceled_calibration(
+                paths,
+                &initial_snapshot,
+                calibration,
+                Some(percent),
+            );
         }
 
-        thread::sleep(Duration::from_secs(FAN_SPEED_CALIBRATION_SETTLE_SECS));
+        calibration.current_percent = Some(percent);
+        calibration.updated_at_unix = Some(unix_timestamp());
+        calibration.status = format!("Testing {percent}% fan speed with firmware latch.");
+        state::persist_fan_speed_calibration(paths, calibration.clone())?;
+
+        apply_calibration_speed_target(paths, &strategy, percent)?;
+
+        if cancel_requested() {
+            return finish_canceled_calibration(
+                paths,
+                &initial_snapshot,
+                calibration,
+                Some(percent),
+            );
+        }
+
+        if !settle_fan_speed_calibration(cancel_requested) {
+            return finish_canceled_calibration(
+                paths,
+                &initial_snapshot,
+                calibration,
+                Some(percent),
+            );
+        }
+
         let verification = build_fan_verification();
         calibration.points.retain(|point| point.percent != percent);
         calibration.points.push(FanSpeedCalibrationPoint {
@@ -321,6 +336,142 @@ pub fn run_fan_speed_calibration(
         "Fan speed calibration complete: recorded {} points. {restore_detail}",
         calibration.points.len()
     );
+    state::persist_fan_speed_calibration(paths, calibration.clone())?;
+    Ok(calibration)
+}
+
+fn apply_calibration_speed_target(
+    paths: &ServicePaths,
+    strategy: &CustomFanStrategy,
+    percent: u8,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    write_log_line(
+        &paths.component_log("control-fan"),
+        "INFO",
+        &format!(
+            "Fan speed calibration applying {percent}% with strategy {}. {}",
+            strategy.id, strategy.reason
+        ),
+    )?;
+
+    let mut behavior_results = Vec::new();
+    if let Some(behavior_input) = strategy.behavior_input {
+        let result =
+            apply_custom_behavior_latch(paths, strategy, behavior_input, "calibration-before")?;
+        if wmi_output_accepted(&result) {
+            thread::sleep(Duration::from_millis(150));
+        }
+        behavior_results.push(result);
+    }
+
+    let mut speed_results = match apply_direct_speed_targets(Some(percent), Some(percent)) {
+        Ok(results) => results,
+        Err(error) => {
+            let detail = format!(
+                "Fan speed calibration {percent}% write failed before all targets were accepted: {error}."
+            );
+            write_log_line(&paths.component_log("control-fan"), "WARN", &detail)?;
+            return Err(io::Error::other(detail).into());
+        }
+    };
+    reject_failed_calibration_speed_results(percent, "target", &speed_results)?;
+
+    if let Some(behavior_input) = strategy.behavior_input {
+        thread::sleep(Duration::from_millis(150));
+        behavior_results.push(apply_custom_behavior_latch(
+            paths,
+            strategy,
+            behavior_input,
+            "calibration-after",
+        )?);
+        thread::sleep(Duration::from_millis(150));
+        let reinforcement = apply_direct_speed_targets(Some(percent), Some(percent))?;
+        reject_failed_calibration_speed_results(percent, "reinforcement", &reinforcement)?;
+        speed_results.extend(reinforcement);
+    }
+
+    write_log_line(
+        &paths.component_log("control-fan"),
+        "INFO",
+        &format!(
+            "Fan speed calibration {percent}% accepted. Behavior [{}]. Speeds [{}].",
+            behavior_results
+                .iter()
+                .map(|result| format!("0x{:08X}->{:?}", result.input, result.output))
+                .collect::<Vec<_>>()
+                .join(", "),
+            speed_results
+                .iter()
+                .map(|result| format!(
+                    "{}:0x{:08X}->{:?}",
+                    result.method, result.input, result.output
+                ))
+                .collect::<Vec<_>>()
+                .join(", "),
+        ),
+    )?;
+
+    Ok(())
+}
+
+fn reject_failed_calibration_speed_results(
+    percent: u8,
+    phase: &str,
+    speed_results: &[super::acer_wmi::AcerWmiMethodResult],
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    if let Some(rejected) = speed_results
+        .iter()
+        .find(|result| !wmi_output_accepted(result))
+    {
+        return Err(io::Error::other(format!(
+            "Fan speed calibration {phase} {percent}% was rejected by AcerGamingFunction {} input {} gmOutput {:?}.",
+            rejected.method, rejected.input, rejected.output
+        ))
+        .into());
+    }
+
+    Ok(())
+}
+
+fn settle_fan_speed_calibration(cancel_requested: &dyn Fn() -> bool) -> bool {
+    let total_ms = FAN_SPEED_CALIBRATION_SETTLE_SECS.saturating_mul(1000);
+    let mut waited_ms = 0;
+    while waited_ms < total_ms {
+        if cancel_requested() {
+            return false;
+        }
+
+        let remaining_ms = total_ms.saturating_sub(waited_ms);
+        let sleep_ms = remaining_ms.min(FAN_SPEED_CALIBRATION_CANCEL_POLL_MS);
+        thread::sleep(Duration::from_millis(sleep_ms));
+        waited_ms = waited_ms.saturating_add(sleep_ms);
+    }
+
+    !cancel_requested()
+}
+
+fn finish_canceled_calibration(
+    paths: &ServicePaths,
+    initial_snapshot: &ControlSnapshot,
+    mut calibration: FanSpeedCalibrationSnapshot,
+    percent: Option<u8>,
+) -> Result<FanSpeedCalibrationSnapshot, Box<dyn std::error::Error + Send + Sync>> {
+    let restore_detail = restore_fan_profile_after_calibration(paths, initial_snapshot)?;
+    let completed_at = unix_timestamp();
+    calibration.running = false;
+    calibration.current_percent = None;
+    calibration.updated_at_unix = Some(completed_at);
+    calibration.completed_at_unix = Some(completed_at);
+    calibration.last_error = None;
+    calibration.status = match percent {
+        Some(percent) => format!(
+            "Fan speed calibration canceled at {percent}%: recorded {} points. {restore_detail}",
+            calibration.points.len()
+        ),
+        None => format!(
+            "Fan speed calibration canceled before the first target: recorded 0 points. {restore_detail}"
+        ),
+    };
     state::persist_fan_speed_calibration(paths, calibration.clone())?;
     Ok(calibration)
 }

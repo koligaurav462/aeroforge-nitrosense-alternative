@@ -18,6 +18,7 @@ import {
   applyPowerProfile,
   applySmartCharging,
   appendPerformanceLog,
+  cancelFanSpeedCalibration,
   checkForUpdates,
   getBackendBootstrap,
   getBackendPollSnapshot,
@@ -1482,6 +1483,7 @@ function App() {
     | 'refresh-rate'
     | 'nvidia-telemetry'
     | 'fan-calibration'
+    | 'fan-calibration-cancel'
   >(null)
   const [glowTarget, setGlowTarget] = useState<string>('turbo')
   const [shellStatus, setShellStatus] = useState('Browser preview shell')
@@ -1565,6 +1567,7 @@ function App() {
   const refreshRatePending = settingsActionPending === 'refresh-rate'
   const nvidiaTelemetryPending = settingsActionPending === 'nvidia-telemetry'
   const fanCalibrationPending = settingsActionPending === 'fan-calibration'
+  const fanCalibrationCancelPending = settingsActionPending === 'fan-calibration-cancel'
   const fanSpeedCalibration = liveControlSnapshot?.fanSpeedCalibration
   const fanCalibrationRunning = fanSpeedCalibration?.running ?? false
   const fanCalibrationPointCount = fanSpeedCalibration?.points?.length ?? 0
@@ -1895,31 +1898,6 @@ function App() {
     },
     [],
   )
-
-  useEffect(() => {
-    const currentWindow = getCurrentWindow()
-    let unlisten: (() => void) | null = null
-
-    void currentWindow
-      .onCloseRequested((event) => {
-        if (!keepUiPrewarmedRef.current) {
-          return
-        }
-
-        event.preventDefault()
-        void currentWindow.hide()
-        setStatusMessage(
-          'AeroForge is hidden and kept prewarmed. Turn off Keep AeroForge Prewarmed to fully exit on close.',
-        )
-      })
-      .then((cleanup) => {
-        unlisten = cleanup
-      })
-
-    return () => {
-      unlisten?.()
-    }
-  }, [])
 
   async function persistStagedControls(overrides?: PersistControlOverrides) {
     const nextActivePowerProfile = overrides?.activePowerProfile ?? activePowerProfile
@@ -3923,13 +3901,31 @@ function App() {
     await persistStagedControls({ keepUiPrewarmed: nextEnabled })
     setStatusMessage(
       nextEnabled
-        ? 'AeroForge will keep a hidden UI instance loaded after close. RAM usage will increase while this is enabled.'
-        : 'AeroForge UI prewarm disabled. Closing the window will fully exit the UI again.',
+        ? 'AeroForge will keep a hidden UI instance available after close. RAM usage will increase while this is enabled.'
+        : 'AeroForge UI prewarm disabled. Closing the window will fully exit the UI.',
     )
   }
 
   async function handleFanSpeedCalibration() {
-    if (settingsActionPending || fanCalibrationRunning) {
+    if (settingsActionPending) {
+      return
+    }
+
+    if (fanCalibrationRunning) {
+      setSettingsActionPending('fan-calibration-cancel')
+      setStatusMessage('Canceling fan speed calibration and restoring the previous fan mode.')
+
+      try {
+        const result = await cancelFanSpeedCalibration()
+        setStatusMessage(result.status)
+      } catch (error) {
+        setStatusMessage(`Fan speed calibration cancel failed: ${describeError(error)}`)
+      } finally {
+        setSettingsActionPending((current) =>
+          current === 'fan-calibration-cancel' ? null : current,
+        )
+      }
+
       return
     }
 
@@ -5270,8 +5266,8 @@ function App() {
                             <strong>Keep AeroForge Prewarmed</strong>
                             <p>
                               {keepUiPrewarmed
-                                ? 'A hidden AeroForge UI instance stays loaded after close so the next open is faster.'
-                                : 'AeroForge fully exits when the window closes. Opening it later will cold-start the UI.'}
+                                ? 'AeroForge keeps a hidden UI instance available after close so the next open is faster.'
+                                : 'AeroForge exits when the window closes. Opening it later will cold-start the UI.'}
                             </p>
                             <small>Warning: this increases RAM usage while enabled.</small>
                           </div>
@@ -5288,11 +5284,15 @@ function App() {
 
                         <div className="personal-setting-block">
                           <div>
-                            <strong>Run Fan Speed Calibration</strong>
+                            <strong>
+                              {fanCalibrationRunning
+                                ? 'Cancel Fan Speed Calibration'
+                                : 'Run Fan Speed Calibration'}
+                            </strong>
                             <p>
-                              Builds a percent-to-RPM table by applying every 5% fan target,
-                              waiting for RPM to settle, then writing the readback into AeroForge
-                              service config.
+                              {fanCalibrationRunning
+                                ? 'Stops the active calibration pass and restores the fan mode that was active before calibration started.'
+                                : 'Builds a percent-to-RPM table by applying every 5% fan target, waiting for RPM to settle, then writing the readback into AeroForge service config.'}
                             </p>
                             {fanSpeedCalibration?.lastError && (
                               <small>{fanSpeedCalibration.lastError}</small>
@@ -5301,15 +5301,17 @@ function App() {
 
                           <button
                             className="button"
-                            disabled={settingsActionPending !== null || fanCalibrationRunning}
+                            disabled={settingsActionPending !== null}
                             onClick={() => void handleFanSpeedCalibration()}
                             type="button"
                           >
-                            {fanCalibrationPending
-                              ? 'Starting'
-                              : fanCalibrationRunning
-                                ? 'Running'
-                                : 'Run Calibration'}
+                            {fanCalibrationCancelPending
+                              ? 'Canceling'
+                              : fanCalibrationPending
+                                ? 'Starting'
+                                : fanCalibrationRunning
+                                  ? 'Cancel Calibration'
+                                  : 'Run Calibration'}
                           </button>
                         </div>
                       </div>

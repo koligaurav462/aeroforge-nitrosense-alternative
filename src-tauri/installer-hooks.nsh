@@ -3,6 +3,82 @@ Var NitroSenseUninstallString
 Var AeroForgeInstallDirSafeToWipe
 Var AeroForgeInstallPawnIO
 
+Function ClearAeroForgePostRebootInstallResidue
+  DetailPrint "Clearing stale AeroForge post-reboot installer launchers..."
+  InitPluginsDir
+  FileOpen $9 "$PLUGINSDIR\ClearAeroForgePostRebootInstall.ps1" w
+  FileWrite $9 "param([string]$$CurrentInstallerPath, [switch]$$RemovePendingRoot)$\r$\n"
+  FileWrite $9 "$$ErrorActionPreference = 'SilentlyContinue'$\r$\n"
+  FileWrite $9 "$$taskName = 'AeroForgePostRebootInstall'$\r$\n"
+  FileWrite $9 "Stop-ScheduledTask -TaskName $$taskName -ErrorAction SilentlyContinue$\r$\n"
+  FileWrite $9 "Unregister-ScheduledTask -TaskName $$taskName -Confirm:$$false -ErrorAction SilentlyContinue$\r$\n"
+  FileWrite $9 "& schtasks.exe /End /TN $$taskName 2>$$null | Out-Null$\r$\n"
+  FileWrite $9 "& schtasks.exe /Delete /TN $$taskName /F 2>$$null | Out-Null$\r$\n"
+  FileWrite $9 "foreach ($$root in @('HKLM:\Software\Microsoft\Windows\CurrentVersion\RunOnce', 'HKCU:\Software\Microsoft\Windows\CurrentVersion\RunOnce')) {$\r$\n"
+  FileWrite $9 "  Remove-ItemProperty -Path $$root -Name $$taskName -Force -ErrorAction SilentlyContinue$\r$\n"
+  FileWrite $9 "}$\r$\n"
+  FileWrite $9 "$$pendingRoot = Join-Path $$env:ProgramData 'AeroForge\PendingInstall'$\r$\n"
+  FileWrite $9 "$$shouldRemovePendingRoot = $$RemovePendingRoot.IsPresent$\r$\n"
+  FileWrite $9 "if (-not $$shouldRemovePendingRoot -and -not [string]::IsNullOrWhiteSpace($$CurrentInstallerPath)) {$\r$\n"
+  FileWrite $9 "  try {$\r$\n"
+  FileWrite $9 "    $$currentFull = [IO.Path]::GetFullPath($$CurrentInstallerPath)$\r$\n"
+  FileWrite $9 "    $$pendingFull = [IO.Path]::GetFullPath($$pendingRoot).TrimEnd('\') + '\'$\r$\n"
+  FileWrite $9 "    $$shouldRemovePendingRoot = -not $$currentFull.StartsWith($$pendingFull, [StringComparison]::OrdinalIgnoreCase)$\r$\n"
+  FileWrite $9 "  } catch { $$shouldRemovePendingRoot = $$true }$\r$\n"
+  FileWrite $9 "}$\r$\n"
+  FileWrite $9 "if ($$shouldRemovePendingRoot -and (Test-Path -LiteralPath $$pendingRoot)) {$\r$\n"
+  FileWrite $9 "  Remove-Item -LiteralPath $$pendingRoot -Recurse -Force -ErrorAction SilentlyContinue$\r$\n"
+  FileWrite $9 "}$\r$\n"
+  FileWrite $9 "exit 0$\r$\n"
+  FileClose $9
+  ExecWait '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "$PLUGINSDIR\ClearAeroForgePostRebootInstall.ps1" "$EXEPATH"' $8
+FunctionEnd
+
+Function ClearAeroForgePostRebootInstallResidueAfterInstall
+  DetailPrint "Clearing completed AeroForge post-reboot installer staging..."
+  InitPluginsDir
+  FileOpen $9 "$PLUGINSDIR\ClearAeroForgePostRebootInstall.ps1" w
+  FileWrite $9 "param([string]$$CurrentInstallerPath, [switch]$$RemovePendingRoot)$\r$\n"
+  FileWrite $9 "$$ErrorActionPreference = 'SilentlyContinue'$\r$\n"
+  FileWrite $9 "$$taskName = 'AeroForgePostRebootInstall'$\r$\n"
+  FileWrite $9 "Stop-ScheduledTask -TaskName $$taskName -ErrorAction SilentlyContinue$\r$\n"
+  FileWrite $9 "Unregister-ScheduledTask -TaskName $$taskName -Confirm:$$false -ErrorAction SilentlyContinue$\r$\n"
+  FileWrite $9 "& schtasks.exe /End /TN $$taskName 2>$$null | Out-Null$\r$\n"
+  FileWrite $9 "& schtasks.exe /Delete /TN $$taskName /F 2>$$null | Out-Null$\r$\n"
+  FileWrite $9 "foreach ($$root in @('HKLM:\Software\Microsoft\Windows\CurrentVersion\RunOnce', 'HKCU:\Software\Microsoft\Windows\CurrentVersion\RunOnce')) {$\r$\n"
+  FileWrite $9 "  Remove-ItemProperty -Path $$root -Name $$taskName -Force -ErrorAction SilentlyContinue$\r$\n"
+  FileWrite $9 "}$\r$\n"
+  FileWrite $9 "$$pendingRoot = Join-Path $$env:ProgramData 'AeroForge\PendingInstall'$\r$\n"
+  FileWrite $9 "if (Test-Path -LiteralPath $$pendingRoot) {$\r$\n"
+  FileWrite $9 "  Remove-Item -LiteralPath $$pendingRoot -Recurse -Force -ErrorAction SilentlyContinue$\r$\n"
+  FileWrite $9 "}$\r$\n"
+  FileWrite $9 "exit 0$\r$\n"
+  FileClose $9
+  ExecWait '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "$PLUGINSDIR\ClearAeroForgePostRebootInstall.ps1" "$EXEPATH" -RemovePendingRoot' $8
+FunctionEnd
+
+Function un.ClearAeroForgePostRebootInstallResidue
+  DetailPrint "Clearing stale AeroForge post-reboot installer launchers..."
+  InitPluginsDir
+  FileOpen $9 "$PLUGINSDIR\ClearAeroForgePostRebootInstall.ps1" w
+  FileWrite $9 "$$ErrorActionPreference = 'SilentlyContinue'$\r$\n"
+  FileWrite $9 "$$taskName = 'AeroForgePostRebootInstall'$\r$\n"
+  FileWrite $9 "Stop-ScheduledTask -TaskName $$taskName -ErrorAction SilentlyContinue$\r$\n"
+  FileWrite $9 "Unregister-ScheduledTask -TaskName $$taskName -Confirm:$$false -ErrorAction SilentlyContinue$\r$\n"
+  FileWrite $9 "& schtasks.exe /End /TN $$taskName 2>$$null | Out-Null$\r$\n"
+  FileWrite $9 "& schtasks.exe /Delete /TN $$taskName /F 2>$$null | Out-Null$\r$\n"
+  FileWrite $9 "foreach ($$root in @('HKLM:\Software\Microsoft\Windows\CurrentVersion\RunOnce', 'HKCU:\Software\Microsoft\Windows\CurrentVersion\RunOnce')) {$\r$\n"
+  FileWrite $9 "  Remove-ItemProperty -Path $$root -Name $$taskName -Force -ErrorAction SilentlyContinue$\r$\n"
+  FileWrite $9 "}$\r$\n"
+  FileWrite $9 "$$pendingRoot = Join-Path $$env:ProgramData 'AeroForge\PendingInstall'$\r$\n"
+  FileWrite $9 "if (Test-Path -LiteralPath $$pendingRoot) {$\r$\n"
+  FileWrite $9 "  Remove-Item -LiteralPath $$pendingRoot -Recurse -Force -ErrorAction SilentlyContinue$\r$\n"
+  FileWrite $9 "}$\r$\n"
+  FileWrite $9 "exit 0$\r$\n"
+  FileClose $9
+  ExecWait '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "$PLUGINSDIR\ClearAeroForgePostRebootInstall.ps1"' $8
+FunctionEnd
+
 Function CleanAeroForgeInstallDirForInstall
   IfFileExists "$INSTDIR\aeroforge-control.exe" 0 check_display_exe_install
     Goto clean_install_dir
@@ -60,75 +136,22 @@ Function ScheduleAeroForgeInstallerAfterReboot
   FileWrite $9 "$$pendingInstaller = Join-Path $$pendingRoot 'AeroForge-Control-Setup-Pending.exe'$\r$\n"
   FileWrite $9 "$$runner = Join-Path $$pendingRoot 'Resume-AeroForgeInstall.ps1'$\r$\n"
   FileWrite $9 "Copy-Item -LiteralPath $$InstallerPath -Destination $$pendingInstaller -Force$\r$\n"
-  FileWrite $9 "$$scheduledBootTime = ''$\r$\n"
-  FileWrite $9 "try { $$scheduledBootTime = (Get-CimInstance -ClassName Win32_OperatingSystem).LastBootUpTime.ToUniversalTime().ToString('o') } catch { Write-ResumeLog ('Could not capture current boot time: ' + $$_.Exception.Message) }$\r$\n"
   FileWrite $9 "$$runnerText = @'$\r$\n"
-  FileWrite $9 "$$ErrorActionPreference = 'Stop'$\r$\n"
-  FileWrite $9 "$$pendingRoot = Join-Path $$env:ProgramData 'AeroForge\PendingInstall'$\r$\n"
-  FileWrite $9 "$$log = Join-Path $$pendingRoot 'resume-schedule.log'$\r$\n"
-  FileWrite $9 "$$shouldUnregisterTask = $$false$\r$\n"
-  FileWrite $9 "$$scheduledBootTimeText = '{SCHEDULE_BOOT_TIME}'$\r$\n"
-  FileWrite $9 "function Write-ResumeLog { param([string]$$Message) try { Add-Content -LiteralPath $$log -Value ('[{0}] {1}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $$Message) -Encoding UTF8 } catch {} }$\r$\n"
-  FileWrite $9 "function Get-BootTimeUtc {$\r$\n"
-  FileWrite $9 "  try { return (Get-CimInstance -ClassName Win32_OperatingSystem).LastBootUpTime.ToUniversalTime() } catch { Write-ResumeLog ('Could not read boot time: ' + $$_.Exception.Message); return [DateTime]::MinValue }$\r$\n"
+  FileWrite $9 "$$ErrorActionPreference = 'SilentlyContinue'$\r$\n"
+  FileWrite $9 "Start-Sleep -Seconds 8$\r$\n"
+  FileWrite $9 "$$installer = Join-Path $$env:ProgramData 'AeroForge\PendingInstall\AeroForge-Control-Setup-Pending.exe'$\r$\n"
+  FileWrite $9 "if (Test-Path -LiteralPath $$installer) {$\r$\n"
+  FileWrite $9 "  Start-Process -FilePath $$installer -ArgumentList @('/D={INSTALL_DIR}') -Wait$\r$\n"
   FileWrite $9 "}$\r$\n"
-  FileWrite $9 "function Test-RebootOccurred {$\r$\n"
-  FileWrite $9 "  if ([string]::IsNullOrWhiteSpace($$scheduledBootTimeText)) { Write-ResumeLog 'No captured boot time; refusing installer resume until a reboot is observed.'; return $$false }$\r$\n"
-  FileWrite $9 "  try { $$scheduledBootTime = [DateTime]::Parse($$scheduledBootTimeText, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind).ToUniversalTime() } catch { Write-ResumeLog ('Could not parse captured boot time: ' + $$_.Exception.Message); return $$false }$\r$\n"
-  FileWrite $9 "  $$currentBootTime = Get-BootTimeUtc$\r$\n"
-  FileWrite $9 "  if ($$currentBootTime -eq [DateTime]::MinValue) { return $$false }$\r$\n"
-  FileWrite $9 "  $$rebooted = $$currentBootTime -gt $$scheduledBootTime.AddSeconds(30)$\r$\n"
-  FileWrite $9 "  Write-ResumeLog ('Boot gate: scheduled boot ' + $$scheduledBootTime.ToString('o') + ', current boot ' + $$currentBootTime.ToString('o') + ', rebooted=' + $$rebooted)$\r$\n"
-  FileWrite $9 "  return $$rebooted$\r$\n"
-  FileWrite $9 "}$\r$\n"
-  FileWrite $9 "function Show-ResumeError {$\r$\n"
-  FileWrite $9 "  param([string]$$Message)$\r$\n"
-  FileWrite $9 "  Write-ResumeLog ('ERROR: ' + $$Message)$\r$\n"
-  FileWrite $9 "  try {$\r$\n"
-  FileWrite $9 "    Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop$\r$\n"
-  FileWrite $9 "    [System.Windows.Forms.MessageBox]::Show($$Message, 'AeroForge Control Setup', [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null$\r$\n"
-  FileWrite $9 "  } catch {$\r$\n"
-  FileWrite $9 "    try { (New-Object -ComObject WScript.Shell).Popup($$Message, 0, 'AeroForge Control Setup', 16) | Out-Null } catch {}$\r$\n"
-  FileWrite $9 "  }$\r$\n"
-  FileWrite $9 "}$\r$\n"
-  FileWrite $9 "try {$\r$\n"
-  FileWrite $9 "  New-Item -ItemType Directory -Force -Path $$pendingRoot | Out-Null$\r$\n"
-  FileWrite $9 "  Write-ResumeLog 'Post-reboot AeroForge installer resume started.'$\r$\n"
-  FileWrite $9 "  if (-not (Test-RebootOccurred)) {$\r$\n"
-  FileWrite $9 "    Write-ResumeLog 'Skipping installer resume because Windows has not rebooted since cleanup was scheduled.'$\r$\n"
-  FileWrite $9 "    exit 0$\r$\n"
-  FileWrite $9 "  }$\r$\n"
-  FileWrite $9 "  $$shouldUnregisterTask = $$true$\r$\n"
-  FileWrite $9 "  Start-Sleep -Seconds 8$\r$\n"
-  FileWrite $9 "  $$installer = Join-Path $$pendingRoot 'AeroForge-Control-Setup-Pending.exe'$\r$\n"
-  FileWrite $9 "  if (-not (Test-Path -LiteralPath $$installer)) {$\r$\n"
-  FileWrite $9 "    Show-ResumeError ('AeroForge setup could not resume because the staged installer is missing: ' + $$installer + [Environment]::NewLine + [Environment]::NewLine + 'Run the latest AeroForge installer manually. Diagnostic log: ' + $$log)$\r$\n"
-  FileWrite $9 "    exit 40$\r$\n"
-  FileWrite $9 "  }$\r$\n"
-  FileWrite $9 "  Write-ResumeLog ('Launching staged installer: ' + $$installer)$\r$\n"
-  FileWrite $9 "  $$process = Start-Process -FilePath $$installer -ArgumentList @('/D={INSTALL_DIR}') -Wait -PassThru -ErrorAction Stop$\r$\n"
-  FileWrite $9 "  $$exitCode = if ($$null -ne $$process.ExitCode) { [int]$$process.ExitCode } else { 0 }$\r$\n"
-  FileWrite $9 "  Write-ResumeLog ('Staged installer exited with code ' + $$exitCode)$\r$\n"
-  FileWrite $9 "  if ($$exitCode -ne 0) {$\r$\n"
-  FileWrite $9 "    Show-ResumeError ('AeroForge setup resumed after reboot, but the installer failed with exit code ' + $$exitCode + '.' + [Environment]::NewLine + [Environment]::NewLine + 'Diagnostic log: ' + $$log)$\r$\n"
-  FileWrite $9 "    exit $$exitCode$\r$\n"
-  FileWrite $9 "  }$\r$\n"
-  FileWrite $9 "  exit 0$\r$\n"
-  FileWrite $9 "} catch {$\r$\n"
-  FileWrite $9 "  Show-ResumeError ('AeroForge setup could not resume after reboot. ' + $$_.Exception.Message + [Environment]::NewLine + [Environment]::NewLine + 'Diagnostic log: ' + $$log)$\r$\n"
-  FileWrite $9 "  exit 41$\r$\n"
-  FileWrite $9 "} finally {$\r$\n"
-  FileWrite $9 "  if ($$shouldUnregisterTask) { Unregister-ScheduledTask -TaskName 'AeroForgePostRebootInstall' -Confirm:$$false -ErrorAction SilentlyContinue }$\r$\n"
-  FileWrite $9 "}$\r$\n"
+  FileWrite $9 "Unregister-ScheduledTask -TaskName 'AeroForgePostRebootInstall' -Confirm:$$false -ErrorAction SilentlyContinue$\r$\n"
   FileWrite $9 "'@$\r$\n"
-  FileWrite $9 "$$runnerText = $$runnerText.Replace('{SCHEDULE_BOOT_TIME}', $$scheduledBootTime)$\r$\n"
   FileWrite $9 "$$runnerText = $$runnerText.Replace('{INSTALL_DIR}', $$InstallDir)$\r$\n"
   FileWrite $9 "Set-Content -LiteralPath $$runner -Value $$runnerText -Encoding UTF8$\r$\n"
   FileWrite $9 "$$action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument ('-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ' + $$runner)$\r$\n"
   FileWrite $9 "$$trigger = New-ScheduledTaskTrigger -AtLogOn$\r$\n"
   FileWrite $9 "$$user = [Security.Principal.WindowsIdentity]::GetCurrent().Name$\r$\n"
   FileWrite $9 "$$principal = New-ScheduledTaskPrincipal -UserId $$user -LogonType Interactive -RunLevel Highest$\r$\n"
-  FileWrite $9 "$$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 30)$\r$\n"
+  FileWrite $9 "$$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 30)$\r$\n"
   FileWrite $9 "try {$\r$\n"
   FileWrite $9 "  Unregister-ScheduledTask -TaskName $$taskName -Confirm:$$false -ErrorAction SilentlyContinue$\r$\n"
   FileWrite $9 "  Register-ScheduledTask -TaskName $$taskName -Action $$action -Trigger $$trigger -Principal $$principal -Settings $$settings -Force | Out-Null$\r$\n"
@@ -161,7 +184,6 @@ Function RequireRebootForCleanInstall
   MessageBox MB_ICONEXCLAMATION|MB_YESNO "AeroForge Control could not fully remove the previous install while Windows is running.$\r$\n$\r$\nSetup has been scheduled to reopen after you sign in again.$\r$\n$\r$\nReboot now to finish cleanup and continue installation?" IDYES reboot_now IDNO reboot_later
   reboot_now:
     Reboot
-    Abort
 
   reboot_later:
     MessageBox MB_ICONINFORMATION|MB_OK "AeroForge setup will reopen after your next reboot/sign-in. Installation is stopping now so old files are not mixed with the new version."
@@ -310,6 +332,7 @@ Function RunNitroSenseUninstall
 FunctionEnd
 
 !macro NSIS_HOOK_PREINSTALL
+  Call ClearAeroForgePostRebootInstallResidue
   Call StopAeroForgeRuntimeForInstall
   Call DetectNitroSense
   StrCmp $NitroSenseUninstallString "" nitro_preinstall_done
@@ -463,9 +486,11 @@ FunctionEnd
 !macro NSIS_HOOK_POSTINSTALL
   Call InstallAeroForgeService
   Call InstallAeroForgeUserRuntime
+  Call ClearAeroForgePostRebootInstallResidueAfterInstall
 !macroend
 
 !macro NSIS_HOOK_PREUNINSTALL
+  Call un.ClearAeroForgePostRebootInstallResidue
   Call un.MarkAeroForgeInstallDirForWipe
   Call un.StopAeroForgeRuntimeForUninstall
   DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "AeroForgeHotkeyHelper"

@@ -284,6 +284,11 @@ fn build_contract() -> BackendContract {
                 purpose: "Start a background fan percent-to-RPM calibration pass and persist the recorded table in service state.".into(),
             },
             CommandDescriptor {
+                command: "cancel_fan_speed_calibration".into(),
+                stage: "implemented".into(),
+                purpose: "Request cancellation of the active fan calibration pass and restore the previous fan mode.".into(),
+            },
+            CommandDescriptor {
                 command: "apply_smart_charging".into(),
                 stage: "implemented".into(),
                 purpose: "Apply Acer battery-health charging mode and persist the staged smart-charge state.".into(),

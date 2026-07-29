@@ -48,6 +48,7 @@ pub fn run() {
             commands::apply_fan_profile,
             commands::apply_custom_fan_curves,
             commands::start_fan_speed_calibration,
+            commands::cancel_fan_speed_calibration,
             commands::apply_boot_logo
         ])
         .setup(move |app| {

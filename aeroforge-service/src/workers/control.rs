@@ -41,6 +41,7 @@ const STARTUP_RECONCILE_CHECKPOINTS_SECS: [u64; 3] = [15, 45, 120];
 static FAN_APPLY_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 static STARTUP_RECONCILE_STATE: OnceLock<Mutex<StartupReconcileState>> = OnceLock::new();
 static FAN_CALIBRATION_RUNNING: AtomicBool = AtomicBool::new(false);
+static FAN_CALIBRATION_CANCEL_REQUESTED: AtomicBool = AtomicBool::new(false);
 
 struct StartupReconcileState {
     started_at: Instant,
@@ -264,6 +265,8 @@ pub fn start_fan_speed_calibration(
         return Ok(state::load_snapshot(paths)?.fan_speed_calibration);
     }
 
+    FAN_CALIBRATION_CANCEL_REQUESTED.store(false, Ordering::SeqCst);
+
     let now = unix_timestamp();
     let calibration = FanSpeedCalibrationSnapshot {
         running: true,
@@ -288,7 +291,9 @@ pub fn start_fan_speed_calibration(
                     .get_or_init(|| Mutex::new(()))
                     .lock()
                     .map_err(|_| "Fan apply lock was poisoned.")?;
-                let completed = fan::run_fan_speed_calibration(&job_paths)?;
+                let completed = fan::run_fan_speed_calibration(&job_paths, &|| {
+                    FAN_CALIBRATION_CANCEL_REQUESTED.load(Ordering::SeqCst)
+                })?;
                 state::persist_fan_speed_calibration(&job_paths, completed)?;
                 Ok(())
             })();
@@ -316,9 +321,46 @@ pub fn start_fan_speed_calibration(
             }
 
             FAN_CALIBRATION_RUNNING.store(false, Ordering::SeqCst);
+            FAN_CALIBRATION_CANCEL_REQUESTED.store(false, Ordering::SeqCst);
         })?;
 
     Ok(calibration)
+}
+
+pub fn cancel_fan_speed_calibration(
+    paths: &ServicePaths,
+) -> Result<FanSpeedCalibrationSnapshot, Box<dyn std::error::Error + Send + Sync>> {
+    let mut snapshot = state::load_snapshot(paths)?;
+    if !FAN_CALIBRATION_RUNNING.load(Ordering::SeqCst) {
+        if snapshot.fan_speed_calibration.running {
+            let now = unix_timestamp();
+            snapshot.fan_speed_calibration.running = false;
+            snapshot.fan_speed_calibration.current_percent = None;
+            snapshot.fan_speed_calibration.updated_at_unix = Some(now);
+            snapshot.fan_speed_calibration.completed_at_unix = Some(now);
+            snapshot.fan_speed_calibration.status =
+                "Fan speed calibration was not running; cleared stale running state.".into();
+            state::persist_fan_speed_calibration(paths, snapshot.fan_speed_calibration.clone())?;
+        }
+        return Ok(snapshot.fan_speed_calibration);
+    }
+
+    FAN_CALIBRATION_CANCEL_REQUESTED.store(true, Ordering::SeqCst);
+
+    let now = unix_timestamp();
+    snapshot.fan_speed_calibration.updated_at_unix = Some(now);
+    snapshot.fan_speed_calibration.status =
+        "Fan speed calibration cancel requested. Restoring the previous fan mode.".into();
+    snapshot.fan_speed_calibration.last_error = None;
+    state::persist_fan_speed_calibration(paths, snapshot.fan_speed_calibration.clone())?;
+
+    write_log_line(
+        &paths.component_log("control-fan"),
+        "INFO",
+        "Fan speed calibration cancel requested by UI.",
+    )?;
+
+    Ok(snapshot.fan_speed_calibration)
 }
 
 fn run(
@@ -347,6 +389,10 @@ fn run(
 
 fn tick(paths: &ServicePaths) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     state::persist_default_snapshot(paths)?;
+
+    if FAN_CALIBRATION_RUNNING.load(Ordering::SeqCst) {
+        return Ok(());
+    }
 
     let initial_snapshot = match state::load_snapshot(paths) {
         Ok(snapshot) => snapshot,

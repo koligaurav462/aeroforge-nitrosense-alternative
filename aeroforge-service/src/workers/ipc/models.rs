@@ -28,6 +28,7 @@ pub enum PipeRequest {
         payload: ApplyCustomFanCurvesRequest,
     },
     StartFanSpeedCalibration,
+    CancelFanSpeedCalibration,
     ApplyBootLogo {
         payload: ApplyBootLogoRequest,
     },

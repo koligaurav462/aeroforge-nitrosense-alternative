@@ -602,6 +602,15 @@ pub async fn start_fan_speed_calibration(
 }
 
 #[tauri::command]
+pub async fn cancel_fan_speed_calibration(
+) -> Result<super::models::FanSpeedCalibrationSnapshot, String> {
+    tauri::async_runtime::spawn_blocking(service_pipe::cancel_fan_speed_calibration)
+        .await
+        .map_err(|error| format!("Fan speed calibration cancel worker failed: {error}"))?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 pub fn apply_boot_logo(
     file_name: String,
     image_base64: String,

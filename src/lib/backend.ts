@@ -460,6 +460,10 @@ export async function startFanSpeedCalibration() {
   return invoke<FanSpeedCalibrationSnapshot>('start_fan_speed_calibration')
 }
 
+export async function cancelFanSpeedCalibration() {
+  return invoke<FanSpeedCalibrationSnapshot>('cancel_fan_speed_calibration')
+}
+
 export async function applyBootLogo(
   fileName: string,
   imageBase64: string,
