@@ -420,6 +420,7 @@ const personalSections: {
   id: PersonalSection
   label: string
   description: string
+  disabled?: boolean
 }[] = [
   {
     id: 'updates',
@@ -444,7 +445,8 @@ const personalSections: {
   {
     id: 'boot',
     label: 'System Boot Effect',
-    description: 'Boot image preview, selection, and upload staging.',
+    description: 'Disabled until this path is reliable.',
+    disabled: true,
   },
 ]
 
@@ -1601,10 +1603,13 @@ function App() {
     backendCapabilities?.blueLightFilter,
     'AeroForge could not expose the blue light filter on this machine.',
   )
-  const bootLogoDisabledReason = describeFeatureSupport(
-    backendCapabilities?.bootLogo,
-    'Boot-logo apply requires the AeroForge service and an unambiguous EFI System Partition.',
-  )
+  const bootEffectPanelDisabled = true
+  const bootLogoDisabledReason = bootEffectPanelDisabled
+    ? 'System Boot Effect is disabled in this build.'
+    : describeFeatureSupport(
+        backendCapabilities?.bootLogo,
+        'Boot-logo apply requires the AeroForge service and an unambiguous EFI System Partition.',
+      )
   const smartChargeWritable = !smartChargeDisabledReason
   const usbPowerVisible = backendCapabilities?.usbPower.available ?? false
   const usbPowerWritable = !usbPowerDisabledReason
@@ -4866,8 +4871,14 @@ function App() {
                         key={section.id}
                         className={`personal-sidebar__item ${
                           activePersonalSection === section.id ? 'is-active' : ''
-                        }`}
-                        onClick={() => setActivePersonalSection(section.id)}
+                        }${section.disabled ? ' is-disabled' : ''}`}
+                        disabled={section.disabled}
+                        aria-disabled={section.disabled}
+                        onClick={() => {
+                          if (!section.disabled) {
+                            setActivePersonalSection(section.id)
+                          }
+                        }}
                       >
                         <strong>{section.label}</strong>
                         <small>{section.description}</small>
@@ -5317,7 +5328,7 @@ function App() {
                       </div>
                     </section>
                   ) : (
-                    <section className="personal-frame">
+                    <section className="personal-frame personal-frame--disabled" aria-disabled="true">
                       <div className="personal-frame__header">
                         <span className="eyebrow">System Boot Effect</span>
                       </div>
@@ -5326,13 +5337,10 @@ function App() {
                           <div className="boot-setting-copy">
                             <strong>Boot Logo Customization</strong>
                             <p>
-                              {bootLogoWritable
-                                ? 'Click a built-in AeroForge splash to apply it, or upload an image. AeroForge preserves GIF files and converts static images to firmware-safe JPEG before apply.'
-                                : bootLogoStatusText}
+                              {bootLogoStatusText}
                             </p>
                             <p className="boot-logo-notice">
-                              Boot logo changing is currently non-functional. If you want this
-                              feature to become reliable, consider contributing to the project.
+                              Boot logo changing is currently non-functional, so this panel is disabled.
                             </p>
                           </div>
 
@@ -5405,8 +5413,8 @@ function App() {
                                   key={art.id}
                                   className={`art-tile ${
                                     selectedBootArt === art.id ? 'is-selected' : ''
-                                  }`}
-                                  disabled={settingsActionPending !== null}
+                                  }${!bootLogoWritable || settingsActionPending !== null ? ' is-disabled' : ''}`}
+                                  disabled={!bootLogoWritable || settingsActionPending !== null}
                                   onClick={() => void handleBootArtworkApply(art)}
                                 >
                                   <div className="art-tile__swatch art-tile__swatch--boot">
