@@ -687,7 +687,24 @@ pub fn restore_startup_state(
             }
         },
     }
-
+    if let Some(tuning) = snapshot.active_gpu_tuning {
+        match apply_gpu_tuning(
+            paths,
+            ApplyGpuTuningRequest { tuning },
+        ) {
+            Ok(applied) => {
+                let _ = write_log_line(
+                    &paths.component_log("control-gpu-tuning"),
+                    "INFO",
+                    &format!("Startup GPU OC applied: {}", applied.detail),
+                );
+            }
+            Err(error) => {
+                let detail = format!("Startup GPU OC failed to apply: {error}");
+                let _ = write_log_line(&paths.component_log("control-gpu-tuning"), "ERROR", &detail);
+            }
+        }
+    }
     Ok(())
 }
 
