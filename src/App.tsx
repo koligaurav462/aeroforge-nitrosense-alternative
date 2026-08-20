@@ -2564,6 +2564,27 @@ function App() {
     let longFrameCount = 0
     let lastLoggedWindowAt = 0
 
+    function stopLoop() {
+      window.cancelAnimationFrame(rafId)
+      rafId = 0
+      previousTimestamp = 0
+    }
+
+    function startLoop() {
+      if (rafId !== 0 || cancelled) {
+        return
+      }
+      rafId = window.requestAnimationFrame(step)
+    }
+
+    function onVisibilityChange() {
+      if (document.visibilityState === 'hidden') {
+        stopLoop()
+      } else {
+        startLoop()
+      }
+    }
+
     function step(timestamp: number) {
       if (cancelled) {
         return
@@ -2641,14 +2662,18 @@ function App() {
       rafId = window.requestAnimationFrame(step)
     }
 
-    rafId = window.requestAnimationFrame(step)
+    document.addEventListener('visibilitychange', onVisibilityChange)
+
+    if (document.visibilityState !== 'hidden') {
+      startLoop()
+    }
 
     return () => {
       cancelled = true
-      window.cancelAnimationFrame(rafId)
+      stopLoop()
+      document.removeEventListener('visibilitychange', onVisibilityChange)
     }
   }, [])
-
   useEffect(() => {
     const tauriInternals = (
       window as Window & { __TAURI_INTERNALS__?: unknown }
