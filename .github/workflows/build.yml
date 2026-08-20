@@ -1,4 +1,4 @@
-name: Build AeroForge (Windows)
+name: Build Full AeroForge (Windows)
 
 on:
   push:
@@ -16,36 +16,50 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 1. Install Node.js
-      - name: Install Node.js
+      # 1. Install Node.js for React/Vite
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      # 2. Activate Visual Studio C++ Build Tools
-      # This forces the GitHub runner to load the MSVC environment variables 
-      # so Rust can find 'link.exe' and the Windows SDKs.
+      # 2. Activate Visual Studio C++ Build Tools (MSVC and Windows SDK)
+      # Essential for compiling the Windows Service and Tauri WebView2 hooks
       - name: Setup Visual Studio Command Prompt
         uses: ilammy/msvc-dev-cmd@v1
 
       # 3. Install Rust (MSVC target)
-      - name: Install Rust
+      - name: Setup Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-msvc
 
-      # 4. Install React dependencies
-      - name: Install frontend dependencies
+      # 4. Install all NPM dependencies
+      - name: Install dependencies
         run: npm install 
 
-      # 5. Compile the App
-      - name: Build Tauri App
+      # 5. Compile the hardware-facing Windows Service first
+      - name: Build AeroForge Windows Service
+        run: npm run service:build
+
+      # 6. Generate the portable package (creates the ZIP in the /portable/ directory)
+      - name: Build Portable Version
+        run: npm run portable:build
+
+      # 7. Build the Tauri App installers and draft a GitHub Release
+      - name: Build Tauri App & Create Release
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: app-v__VERSION__
           releaseName: 'AeroForge v__VERSION__'
-          releaseBody: 'Automated build containing the visibility rAF patch.'
+          releaseBody: 'Automated full build containing the patched React UI, Tauri shell, and Windows Service.'
           releaseDraft: true
           prerelease: false
+
+      # 8. Upload the Portable ZIP to GitHub Actions for easy downloading
+      - name: Upload Portable ZIP as Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AeroForge-Portable-Build
+          path: portable\*.zip
