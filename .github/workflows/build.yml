@@ -1,0 +1,51 @@
+name: Build AeroForge (Windows)
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 1. Install Node.js
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # 2. Activate Visual Studio C++ Build Tools
+      # This forces the GitHub runner to load the MSVC environment variables 
+      # so Rust can find 'link.exe' and the Windows SDKs.
+      - name: Setup Visual Studio Command Prompt
+        uses: ilammy/msvc-dev-cmd@v1
+
+      # 3. Install Rust (MSVC target)
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      # 4. Install React dependencies
+      - name: Install frontend dependencies
+        run: npm install 
+
+      # 5. Compile the App
+      - name: Build Tauri App
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: app-v__VERSION__
+          releaseName: 'AeroForge v__VERSION__'
+          releaseBody: 'Automated build containing the visibility rAF patch.'
+          releaseDraft: true
+          prerelease: false
