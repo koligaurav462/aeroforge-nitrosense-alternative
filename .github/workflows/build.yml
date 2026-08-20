@@ -35,33 +35,31 @@ jobs:
       - name: Install NPM Dependencies
         run: npm install
 
-      # 5. Build the Windows Service
-      - name: Build AeroForge Service
-        run: npm run service:build
-
-      # 6. Build the Hotkey Helper Binary
-      # This generates src-tauri\target\release\aeroforge-hotkey-helper.exe
-      - name: Build Hotkey Helper
-        run: cargo build --release --manifest-path src-tauri/Cargo.toml --bin aeroforge-hotkey-helper
-
-      # 7. Ensure target release paths exist and mirror the helper binary
-      - name: Ensure Target Directory Structure
+      # 5. Build Background Services & Bypass Tauri Pre-Check
+      - name: Prepare Bundle Resources
         shell: pwsh
         run: |
+          # Create a dummy file to bypass Tauri's chicken-and-egg resource check.
+          # (Cargo triggers build.rs before compiling the helper, failing on clean runners)
+          Write-Host "Creating dummy file to bypass Tauri build.rs pre-check..." -ForegroundColor Cyan
           New-Item -ItemType Directory -Force -Path "src-tauri/target/release"
-          New-Item -ItemType Directory -Force -Path "target/release"
-          $helper = Get-ChildItem -Path . -Filter "aeroforge-hotkey-helper.exe" -Recurse | Select-Object -First 1
-          if ($helper) {
-              Copy-Item $helper.FullName -Destination "src-tauri/target/release/aeroforge-hotkey-helper.exe" -Force
-              Copy-Item $helper.FullName -Destination "target/release/aeroforge-hotkey-helper.exe" -Force
-              Write-Host "Staged aeroforge-hotkey-helper.exe successfully." -ForegroundColor Green
-          }
+          New-Item -ItemType File -Force -Path "src-tauri/target/release/aeroforge-hotkey-helper.exe"
+          
+          # Run the official script which compiles BOTH the service and the hotkey helper
+          powershell -ExecutionPolicy Bypass -File scripts/Prepare-BundleResources.ps1
 
-      # 8. Build Desktop Shell and Bundle Portable & Installer Packages
+      # 6. Ensure paths mirror for Tauri's strict bundler
+      - name: Sync Target Paths
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "target/release" -ErrorAction SilentlyContinue
+          Copy-Item "src-tauri/target/release/aeroforge-hotkey-helper.exe" -Destination "target/release/aeroforge-hotkey-helper.exe" -Force
+
+      # 7. Build Desktop App and Portable Bundle
       - name: Build Desktop App and Portable Bundle
         run: npm run portable:build
 
-      # 9. Upload Portable ZIP & Setup Installer to GitHub Actions Artifacts
+      # 8. Upload Portable ZIP & Setup Installer to GitHub Actions Artifacts
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
         with:
