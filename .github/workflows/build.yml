@@ -5,7 +5,6 @@ on:
     branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
-  # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
 
 jobs:
@@ -22,8 +21,7 @@ jobs:
         with:
           node-version: '20'
 
-      # 2. Activate Visual Studio C++ Build Tools (MSVC and Windows SDK)
-      # Essential for compiling the Windows Service and Tauri WebView2 hooks
+      # 2. Activate Visual Studio C++ Build Tools
       - name: Setup Visual Studio Command Prompt
         uses: ilammy/msvc-dev-cmd@v1
 
@@ -37,15 +35,21 @@ jobs:
       - name: Install dependencies
         run: npm install 
 
-      # 5. Compile the hardware-facing Windows Service first
+      # 5. Build the Hotkey Helper FIRST
+      # The main Tauri build script requires this .exe to exist before it runs
+      - name: Build Hotkey Helper
+        working-directory: src-tauri
+        run: cargo build --release --bin aeroforge-hotkey-helper
+
+      # 6. Compile the hardware-facing Windows Service
       - name: Build AeroForge Windows Service
         run: npm run service:build
 
-      # 6. Generate the portable package (creates the ZIP in the /portable/ directory)
+      # 7. Generate the portable package
       - name: Build Portable Version
         run: npm run portable:build
 
-      # 7. Build the Tauri App installers and draft a GitHub Release
+      # 8. Build the Tauri App installers and draft a GitHub Release
       - name: Build Tauri App & Create Release
         uses: tauri-apps/tauri-action@v0
         env:
@@ -57,7 +61,7 @@ jobs:
           releaseDraft: true
           prerelease: false
 
-      # 8. Upload the Portable ZIP to GitHub Actions for easy downloading
+      # 9. Upload the Portable ZIP to GitHub Actions
       - name: Upload Portable ZIP as Artifact
         uses: actions/upload-artifact@v4
         with:
