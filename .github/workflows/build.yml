@@ -1,4 +1,4 @@
-name: Build Full AeroForge (Windows)
+name: Build AeroForge Suite
 
 on:
   push:
@@ -15,55 +15,57 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 1. Install Node.js for React/Vite
+      # 1. Setup Node.js
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      # 2. Activate Visual Studio C++ Build Tools
+      # 2. Setup MSVC C++ Environment (link.exe / Windows SDK)
       - name: Setup Visual Studio Command Prompt
         uses: ilammy/msvc-dev-cmd@v1
 
-      # 3. Install Rust (MSVC target)
+      # 3. Setup Rust
       - name: Setup Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-msvc
 
-      # 4. Install all NPM dependencies
-      - name: Install dependencies
-        run: npm install 
+      # 4. Install Frontend & CLI Dependencies
+      - name: Install NPM Dependencies
+        run: npm install
 
-      # 5. Build the Hotkey Helper FIRST
-      # The main Tauri build script requires this .exe to exist before it runs
-      - name: Build Hotkey Helper
-        working-directory: src-tauri
-        run: cargo build --release --bin aeroforge-hotkey-helper
-
-      # 6. Compile the hardware-facing Windows Service
-      - name: Build AeroForge Windows Service
+      # 5. Build the Windows Service
+      - name: Build AeroForge Service
         run: npm run service:build
 
-      # 7. Generate the portable package
-      - name: Build Portable Version
+      # 6. Build the Hotkey Helper Binary
+      # This generates src-tauri\target\release\aeroforge-hotkey-helper.exe
+      - name: Build Hotkey Helper
+        run: cargo build --release --manifest-path src-tauri/Cargo.toml --bin aeroforge-hotkey-helper
+
+      # 7. Ensure target release paths exist and mirror the helper binary
+      - name: Ensure Target Directory Structure
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "src-tauri/target/release"
+          New-Item -ItemType Directory -Force -Path "target/release"
+          $helper = Get-ChildItem -Path . -Filter "aeroforge-hotkey-helper.exe" -Recurse | Select-Object -First 1
+          if ($helper) {
+              Copy-Item $helper.FullName -Destination "src-tauri/target/release/aeroforge-hotkey-helper.exe" -Force
+              Copy-Item $helper.FullName -Destination "target/release/aeroforge-hotkey-helper.exe" -Force
+              Write-Host "Staged aeroforge-hotkey-helper.exe successfully." -ForegroundColor Green
+          }
+
+      # 8. Build Desktop Shell and Bundle Portable & Installer Packages
+      - name: Build Desktop App and Portable Bundle
         run: npm run portable:build
 
-      # 8. Build the Tauri App installers and draft a GitHub Release
-      - name: Build Tauri App & Create Release
-        uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tagName: app-v__VERSION__
-          releaseName: 'AeroForge v__VERSION__'
-          releaseBody: 'Automated full build containing the patched React UI, Tauri shell, and Windows Service.'
-          releaseDraft: true
-          prerelease: false
-
-      # 9. Upload the Portable ZIP to GitHub Actions
-      - name: Upload Portable ZIP as Artifact
+      # 9. Upload Portable ZIP & Setup Installer to GitHub Actions Artifacts
+      - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: AeroForge-Portable-Build
-          path: portable\*.zip
+          name: AeroForge-v0.16.3-Windows
+          path: |
+            portable/*.zip
+            portable/*.exe
